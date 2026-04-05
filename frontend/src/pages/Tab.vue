@@ -68,7 +68,7 @@ const alphaTabState = useAlphaTab(
 
 const {
     api, score, tracks, ready, tab, tabID, youtubeList, audioList,
-    keySignature, playbackRange, load, destroyContainer,
+    keySignature, playbackRange, load, loadMetadata, getFileText, destroyContainer,
     simpleSync, advancedSync, overrideHiddenStaves, onScoreLoaded, onPlayerFinished,
     ScrollMode, StaveProfile,
 } = alphaTabState;
@@ -309,7 +309,11 @@ function handleImportChords(parsed) {
 }
 
 function closeChordSheet() {
-    chordSheetData.value = null;
+    if (isTextFile(tab.value.filename)) {
+        router.push("/");
+    } else {
+        chordSheetData.value = null;
+    }
 }
 
 function resetAllState() {
@@ -331,10 +335,31 @@ function fullDestroy() {
     resetAllState();
 }
 
+function isTextFile(filename) {
+    return filename && filename.toLowerCase().endsWith(".txt");
+}
+
 async function loadTab(trackID) {
     if (api.value) {
         fullDestroy();
     }
+
+    // Fetch metadata first to check file type before initializing alphaTab
+    await loadMetadata(router);
+
+    if (isTextFile(tab.value.filename)) {
+        // Text file — fetch raw content and render as monospace text
+        const text = await getFileText();
+        chordSheetData.value = {
+            chordHtml: null,
+            rawText: text,
+            title: tab.value.title,
+            artist: tab.value.artist,
+        };
+        return;
+    }
+
+    // Music file — initialize alphaTab (load will re-use already-fetched metadata)
     return await load(trackID, bassTabContainer.value, router);
 }
 
@@ -428,7 +453,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="main" :class='{ "light": setting.scoreColor === "light", "performance-mode": performanceMode }'>
+    <div class="main" v-show="!chordSheetData" :class='{ "light": setting.scoreColor === "light", "performance-mode": performanceMode }'>
         <h1>{{ tab.title }}</h1>
         <h2>{{ tab.artist }}</h2>
         <div class="key-signature badge bg-secondary" v-if="keySignature && setting.showKeySignature">
@@ -570,6 +595,7 @@ onBeforeUnmount(() => {
     <ChordSheet
         v-if="chordSheetData"
         :chord-html="chordSheetData.chordHtml"
+        :raw-text="chordSheetData.rawText"
         :title="chordSheetData.title"
         :artist="chordSheetData.artist"
         @close="closeChordSheet"

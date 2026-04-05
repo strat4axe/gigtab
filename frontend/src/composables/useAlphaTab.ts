@@ -315,11 +315,7 @@ export function useAlphaTab(
         playbackRange.value = null;
     }
 
-    async function load(trackID: number, containerRef: HTMLElement, router: any) {
-        if (api.value) {
-            destroyContainer();
-        }
-
+    async function loadMetadata(router: any) {
         const res = await fetch(baseURL + `/api/tab/${tabID.value}`, {
             credentials: "include",
         });
@@ -342,6 +338,26 @@ export function useAlphaTab(
             audioList.value = data.audioList;
         }
 
+        return data;
+    }
+
+    async function getFileText() {
+        const tempToken = await getTempToken();
+        const url = getFileURL(tempToken);
+        const res = await fetch(url, { credentials: "include" });
+        return await res.text();
+    }
+
+    async function load(trackID: number, containerRef: HTMLElement, router: any) {
+        if (api.value) {
+            destroyContainer();
+        }
+
+        // Load metadata if not already loaded (e.g. by Tab.vue for file type detection)
+        if (!tab.value.id || tab.value.id === "-1") {
+            await loadMetadata(router);
+        }
+
         const tempToken = await getTempToken();
 
         // Requested trackID may be invalid, so we need to get the actual trackID used
@@ -362,6 +378,8 @@ export function useAlphaTab(
         keySignature,
         playbackRange,
         load,
+        loadMetadata,
+        getFileText,
         destroyContainer,
         simpleSync,
         advancedSync,
