@@ -15,7 +15,7 @@ export function buildWindows() {
             //  "--no-check",
             "--allow-all",
             "--output",
-            "its-mytabs.exe",
+            "gigtab.exe",
             "--node-modules-dir=none",
             "--target",
             "x86_64-pc-windows-msvc",

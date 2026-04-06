@@ -63,8 +63,8 @@ export function getRepoNames() {
         return process.env.RELEASE_REPO_NAMES.split(",").map((name) => name.trim());
     }
     return [
-        "louislam/its-mytabs",
-        "ghcr.io/louislam/its-mytabs",
+        "strat4axe/gigtab",
+        "ghcr.io/strat4axe/gigtab",
     ];
 }
 

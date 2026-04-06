@@ -120,7 +120,7 @@ export default defineComponent({
 
 <template>
     <div class="container my-container">
-        <div class="display-6 mb-4 mt-5">Upload Guitar Pro or MusicXML files</div>
+        <div class="display-6 mb-4 mt-5">Upload Tab Files</div>
 
         <Vue3Dropzone
             v-model="files"

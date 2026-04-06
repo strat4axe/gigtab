@@ -1,5 +1,5 @@
 {
-    "name": "its-mytabs-frontend",
+    "name": "gigtab-frontend",
     "type": "module",
     "scripts": {
         "dev-frontend": "NODE_ENV=development vite",

@@ -40,7 +40,7 @@ import * as cheerio from "cheerio";
 let httpServer: ServerType;
 
 export async function main() {
-    console.log(`It's MyTabs v${appVersion}`);
+    console.log(`GigTab v${appVersion}`);
 
     if (isInitDB()) {
         console.log("Database initialized.");
