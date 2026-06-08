@@ -1,9 +1,10 @@
 {
     "compilerOptions": {
         "module": "esnext",
-        "moduleResolution": "nodenext",
+        "moduleResolution": "bundler",
         "allowImportingTsExtensions": true,
         "resolveJsonModule": true,
-        "allowSyntheticDefaultImports": true
+        "allowSyntheticDefaultImports": true,
+        "noEmit": true
     }
 }

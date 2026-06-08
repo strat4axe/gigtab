@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GigTab</string>
+    <string name="title_activity_main">GigTab</string>
+    <string name="package_name">com.gigtab.app</string>
+    <string name="custom_url_scheme">com.gigtab.app</string>
+</resources>
