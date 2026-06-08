@@ -3,6 +3,7 @@ import { defineComponent } from "vue";
 import { SettingSchema } from "../zod.ts";
 import { baseURL, checkFetch, generalError, getSetting, successMessage } from "../app.js";
 import { ScrollMode } from "@coderline/alphatab";
+import { authorize, isAuthorized, unauthorize } from "../services/apple-music.ts";
 
 export default defineComponent({
     computed: {
@@ -24,10 +25,12 @@ export default defineComponent({
                 toolbarAutoHide: false,
             },
             isProcessing: false,
+            isAppleMusicConnected: false,
         };
     },
     mounted() {
         this.setting = getSetting();
+        this.checkAppleMusicAuth();
     },
     methods: {
         /**
@@ -103,6 +106,38 @@ export default defineComponent({
                 successMessage("Reset to default settings successfully");
             } catch (e) {
                 generalError(e);
+            }
+        },
+
+        async checkAppleMusicAuth() {
+            this.isAppleMusicConnected = await isAuthorized();
+        },
+        async connectAppleMusic() {
+            try {
+                this.isProcessing = true;
+                const connected = await authorize();
+                this.isAppleMusicConnected = connected;
+                if (connected) {
+                    successMessage("Connected to Apple Music successfully!");
+                } else {
+                    generalError(new Error("Apple Music authorization failed."));
+                }
+            } catch (e) {
+                generalError(e);
+            } finally {
+                this.isProcessing = false;
+            }
+        },
+        async disconnectAppleMusic() {
+            try {
+                this.isProcessing = true;
+                await unauthorize();
+                this.isAppleMusicConnected = false;
+                successMessage("Disconnected from Apple Music successfully!");
+            } catch (e) {
+                generalError(e);
+            } finally {
+                this.isProcessing = false;
             }
         },
     },
@@ -225,6 +260,22 @@ export default defineComponent({
                 <option :value="false">No</option>
                 <option :value="true">Yes</option>
             </select>
+        </div>
+
+        <h2 class="mt-5 mb-4">Apple Music</h2>
+        <div class="mb-3">
+            <label class="form-label d-block">Connection Status</label>
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge" :class='isAppleMusicConnected ? "bg-success" : "bg-secondary"'>
+                    {{ isAppleMusicConnected ? "Connected" : "Disconnected" }}
+                </span>
+                <button v-if="!isAppleMusicConnected" class="btn btn-primary" :disabled="isProcessing" @click.prevent="connectAppleMusic">
+                    Connect Apple Music
+                </button>
+                <button v-else class="btn btn-danger" :disabled="isProcessing" @click.prevent="disconnectAppleMusic">
+                    Disconnect
+                </button>
+            </div>
         </div>
 
         <h2 class="mt-5 mb-4">Others</h2>

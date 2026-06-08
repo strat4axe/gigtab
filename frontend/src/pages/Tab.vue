@@ -75,6 +75,7 @@ const {
     tabID,
     youtubeList,
     audioList,
+    appleMusicList,
     keySignature,
     playbackRange,
     load,
@@ -174,6 +175,7 @@ const audioSync = useAudioSync(
     tabID,
     youtubeList,
     audioList,
+    appleMusicList,
     simpleSync,
     advancedSync,
     pause,
@@ -188,13 +190,18 @@ const {
     currentAudio,
     youtube,
     audio,
+    appleMusic,
     simpleSyncSecond,
     showAudioList,
     syncMethod,
     audioYoutube,
     audioFile,
+    audioAppleMusic,
     audioSynth,
     audioBackingTrack,
+    saveYoutube,
+    saveAudio,
+    saveAppleMusic,
     setYoutubeRef,
     setAudioPlayerRef,
 } = audioSync;
@@ -371,6 +378,7 @@ function resetAllState() {
     scrollMode.value = ScrollMode.Continuous;
     soloTrackID.value = -1;
     youtube.value = {};
+    appleMusic.value = {};
     simpleSyncSecond.value = -1;
     muteTrackList.value = {};
 }
@@ -588,6 +596,10 @@ onBeforeUnmount(() => {
                     <div class="name">{{ audio.filename }}</div>
                 </div>
 
+                <div class="audio item" @click="audioAppleMusic(am.trackID)" v-for="am in appleMusicList" :key="am.trackID" :class='{ active: currentAudio === "applemusic-" + am.trackID }'>
+                    <div class="name">Apple Music: {{ am.trackID }}</div>
+                </div>
+
                 <!-- No Audio -->
                 <div
                     class="audio item"
@@ -604,7 +616,7 @@ onBeforeUnmount(() => {
             </div>
 
             <!-- USE v-show, because youtube player is not vue  -->
-            <div v-show='currentAudio.startsWith("youtube-") || currentAudio.startsWith("audio-")' class="player-container">
+            <div v-show='currentAudio.startsWith("youtube-") || currentAudio.startsWith("audio-") || currentAudio.startsWith("applemusic-")' class="player-container">
                 <!-- Simple sync edit -->
                 <div class="sync-offset ps-3 pe-3 p-2" v-if='syncMethod === "simple" && isLoggedIn'>
                     Sync Offset: <input type="number" class="form-control" min="-100000" max="100000" step="0.1" v-model="simpleSyncSecond" /> s

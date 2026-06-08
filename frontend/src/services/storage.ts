@@ -10,6 +10,9 @@ export interface CachedTab {
     updatedAt: string; // ISO timestamp
     localOnly?: boolean; // tab created offline that doesn't exist on server yet
     pendingSync?: boolean; // tab created or modified offline and needs to be synced
+    youtubeList?: any[];
+    audioList?: any[];
+    appleMusicList?: any[];
 }
 
 // Define Tab file structure stored in IndexedDB

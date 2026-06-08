@@ -6,6 +6,7 @@ import Vue3Dropzone from "@jaxtheprime/vue3-dropzone";
 import { supportedAudioFormatCommaString, supportedFormatCommaString } from "../../../backend/common.js";
 import SyncOptions from "../components/SyncOptions.vue";
 import { FontAwesomeIcon } from "../icon.ts";
+import { getMusicKitInstance } from "../services/apple-music.ts";
 
 const alphaTab = await import("@coderline/alphatab");
 
@@ -19,6 +20,11 @@ export default defineComponent({
             youtubeURL: "",
             youtubeList: [],
             audioList: [],
+            appleMusicList: [],
+            appleMusicTrackID: "",
+            appleMusicSearchQuery: "",
+            appleMusicSearchResults: [],
+            isSearchingAppleMusic: false,
             // isLocalIP: false,
             supportedFormatCommaString,
             supportedAudioFormatCommaString,
@@ -54,6 +60,7 @@ export default defineComponent({
                 this.tab = data.tab;
                 this.youtubeList = data.youtubeList;
                 this.audioList = data.audioList;
+                this.appleMusicList = data.appleMusicList || [];
                 this.filePath = data.filePath;
                 this.showOpenButtons = data.showOpenButtons;
             } finally {
@@ -351,6 +358,115 @@ export default defineComponent({
                 notify({ text: e.message || e, type: "error" });
             }
         },
+
+        async searchAppleMusic() {
+            if (!this.appleMusicSearchQuery.trim()) {
+                return;
+            }
+            this.isSearchingAppleMusic = true;
+            this.appleMusicSearchResults = [];
+            try {
+                const music = await getMusicKitInstance();
+                const response = await music.api.search(this.appleMusicSearchQuery, {
+                    types: "songs",
+                    limit: 10,
+                });
+                this.appleMusicSearchResults = response.songs?.data || [];
+                if (this.appleMusicSearchResults.length === 0) {
+                    notify({
+                        text: "No tracks found matching query",
+                        type: "info",
+                    });
+                }
+            } catch (e) {
+                notify({
+                    text: e.message || "Failed to search Apple Music catalog",
+                    type: "error",
+                });
+            } finally {
+                this.isSearchingAppleMusic = false;
+            }
+        },
+
+        async addAppleMusicTrack(trackID) {
+            try {
+                const tabID = this.tab.id;
+                const res = await fetch(baseURL + `/api/tab/${tabID}/applemusic`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        trackID,
+                    }),
+                });
+
+                await checkFetch(res);
+                notify({
+                    text: "Apple Music track added successfully",
+                    type: "success",
+                });
+                this.appleMusicTrackID = "";
+                await this.load();
+            } catch (e) {
+                generalError(e);
+            }
+        },
+
+        async saveAppleMusic(am) {
+            let res;
+            try {
+                const tabID = this.tab.id;
+                res = await fetch(baseURL + `/api/tab/${tabID}/applemusic/${am.trackID}`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        syncMethod: am.syncMethod,
+                        simpleSync: am.simpleSync,
+                        advancedSync: am.advancedSync,
+                    }),
+                });
+
+                await checkFetch(res);
+
+                notify({
+                    text: "Apple Music track updated successfully",
+                    type: "success",
+                });
+            } catch (e) {
+                generalError(e);
+            }
+        },
+
+        async removeAppleMusic(am) {
+            try {
+                if (!confirm("Are you sure you want to remove this Apple Music track?")) {
+                    return;
+                }
+
+                const tabID = this.tab.id;
+
+                const res = await fetch(baseURL + `/api/tab/${tabID}/applemusic/${am.trackID}`, {
+                    method: "DELETE",
+                    credentials: "include",
+                });
+
+                await checkFetch(res);
+
+                notify({
+                    text: "Apple Music track removed successfully",
+                    type: "success",
+                });
+
+                await this.load();
+            } catch (e) {
+                generalError(e);
+            }
+        },
     },
 });
 </script>
@@ -382,6 +498,7 @@ export default defineComponent({
             <div class="btn-group" role="group">
                 <router-link :to="`/tab/${tab.id}/edit/info`" class="btn btn-secondary">Info</router-link>
                 <router-link :to="`/tab/${tab.id}/edit/audio`" class="btn btn-secondary">Youtube & Audio files</router-link>
+                <router-link :to="`/tab/${tab.id}/edit/apple-music`" class="btn btn-secondary">Apple Music</router-link>
                 <router-link :to="`/tab/${tab.id}/edit/tab-file`" class="btn btn-secondary">Tab file</router-link>
             </div>
         </div>
@@ -528,6 +645,88 @@ export default defineComponent({
             </div>
         </div>
 
+        <!-- Apple Music Page -->
+        <div v-else-if='this.page === "apple-music"'>
+            <h2 class="mt-4 mb-4">Apple Music Integration</h2>
+
+            <!-- Manual track ID linking -->
+            <div class="mb-4">
+                <h4>Link Apple Music Track ID</h4>
+                <div class="input-group">
+                    <input type="text" class="form-control" placeholder="Enter Apple Music Song Catalog ID (e.g., 1440854431)" v-model="appleMusicTrackID">
+                    <button class="btn btn-primary" type="button" @click.prevent="addAppleMusicTrack(appleMusicTrackID)">Link Track</button>
+                </div>
+            </div>
+
+            <!-- Apple Music Search/Catalog query -->
+            <div class="mb-4">
+                <h4>Search Apple Music Catalog</h4>
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" placeholder="Search title, artist, or album..." v-model="appleMusicSearchQuery" @keyup.enter="searchAppleMusic">
+                    <button class="btn btn-primary" type="button" @click.prevent="searchAppleMusic" :disabled="isSearchingAppleMusic">
+                        {{ isSearchingAppleMusic ? "Searching..." : "Search" }}
+                    </button>
+                </div>
+
+                <!-- Search Results -->
+                <div v-if="appleMusicSearchResults.length > 0" class="search-results card bg-dark border-secondary p-3 mb-4">
+                    <h5 class="mb-3 text-white">Results</h5>
+                    <div class="list-group">
+                        <div
+                            v-for="track in appleMusicSearchResults"
+                            :key="track.id"
+                            class="list-group-item bg-dark text-white border-secondary d-flex align-items-center justify-content-between gap-3 p-3"
+                        >
+                            <div class="d-flex align-items-center gap-3">
+                                <img
+                                    v-if="track.attributes?.artwork"
+                                    :src='track.attributes.artwork.url.replace("{w}", "60").replace("{h}", "60")'
+                                    alt="Artwork"
+                                    width="60"
+                                    height="60"
+                                    class="rounded"
+                                >
+                                <div>
+                                    <div class="fw-bold">{{ track.attributes?.name }}</div>
+                                    <div class="text-secondary small">{{ track.attributes?.artistName }} — {{ track.attributes?.albumName }}</div>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-primary" @click.prevent="addAppleMusicTrack(track.id)">Link this Track</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Linked Apple Music Tracks List -->
+            <div class="mb-5">
+                <h3>Linked Apple Music Tracks</h3>
+                <div v-if="appleMusicList.length === 0" class="text-secondary">
+                    No Apple Music tracks currently linked to this tab.
+                </div>
+                <div v-else>
+                    <div v-for="am in appleMusicList" :key="am.trackID" class="apple-music-item mb-3 pb-3">
+                        <div class="track-details mb-2">
+                            <strong>Track ID:</strong> <a :href="`https://music.apple.com/us/song/${am.trackID}`" target="_blank">{{ am.trackID }}</a>
+                        </div>
+                        <div class="info">
+                            <SyncOptions
+                                :syncMethod="am.syncMethod"
+                                :simpleSync="am.simpleSync"
+                                :advancedSync="am.advancedSync"
+                                @update:syncMethod="am.syncMethod = $event"
+                                @update:simpleSync="am.simpleSync = $event"
+                                @update:advancedSync="am.advancedSync = $event"
+                            />
+                            <button class="btn btn-primary" @click.prevent="saveAppleMusic(am)">Save</button>
+                        </div>
+                        <div class="buttons">
+                            <button class="btn btn-danger" @click.prevent="removeAppleMusic(am)">Remove</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Tab File Page -->
         <div v-else-if='this.page === "tab-file"' class="mb-5">
             <h2 class="mt-4 mb-4">Method 1: Direct Edit</h2>
@@ -570,7 +769,7 @@ export default defineComponent({
     }
 }
 
-.youtube-item, .audio-item {
+.youtube-item, .audio-item, .apple-music-item {
     display: flex;
     gap: 15px;
     align-items: flex-start;

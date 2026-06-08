@@ -2,7 +2,7 @@ import { serve, ServerType } from "@hono/node-server";
 import { Context, Hono } from "@hono/hono";
 import * as fs from "@std/fs";
 import { auth, checkLogin, getCurrentSession, isFinishSetup, isLoggedIn } from "./auth.ts";
-import { SignUpSchema, SyncRequestSchema, UpdateTabFavSchema, UpdateTabInfoSchema, YoutubeAddDataSchema } from "./zod.ts";
+import { AppleMusicAddDataSchema, SignUpSchema, SyncRequestSchema, UpdateTabFavSchema, UpdateTabInfoSchema, YoutubeAddDataSchema } from "./zod.ts";
 import { db, hasUser, isInitDB, kv, migrate } from "./db.ts";
 import { cors } from "@hono/hono/cors";
 import { serveStatic } from "@hono/hono/deno";
@@ -10,6 +10,7 @@ import { appVersion, checkFilename, dataDir, devOriginList, getFrontendDir, getS
 import * as path from "@std/path";
 import { supportedAudioFormatList, supportedFormatList } from "./common.ts";
 import {
+    addAppleMusic,
     addAudio,
     addYoutube,
     checkTabExists,
@@ -22,9 +23,11 @@ import {
     getTabFilePath,
     getTabFolderPath,
     getTabFullFilePath,
+    removeAppleMusic,
     removeAudio,
     removeYoutube,
     replaceTab,
+    updateAppleMusic,
     updateAudio,
     updateConfigJSON,
     updateTab,
@@ -273,6 +276,7 @@ export async function main() {
                 tab: config.tab,
                 youtubeList: config.youtube,
                 audioList: config.audio,
+                appleMusicList: config.appleMusic || [],
                 filePath,
             });
         } catch (e) {
@@ -549,6 +553,65 @@ export async function main() {
         }
     });
 
+    // Add Apple Music (POST /api/tab/${tabID}/applemusic)
+    app.post("/api/tab/:id/applemusic", async (c) => {
+        try {
+            await checkLogin(c);
+            const id = c.req.param("id");
+
+            const body = await c.req.json();
+            const data = AppleMusicAddDataSchema.parse(body);
+
+            await checkTabExists(id);
+            await addAppleMusic(id, data.trackID);
+
+            return c.json({
+                ok: true,
+            });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Save Apple Music config (POST /api/tab/${tabID}/applemusic/${trackID})
+    app.post("/api/tab/:id/applemusic/:trackID", async (c) => {
+        try {
+            await checkLogin(c);
+            const id = c.req.param("id");
+            const trackID = c.req.param("trackID");
+
+            const body = await c.req.json();
+            const data = SyncRequestSchema.parse(body);
+
+            await checkTabExists(id);
+            await updateAppleMusic(id, trackID, data);
+
+            return c.json({
+                ok: true,
+            });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Remove Apple Music (DELETE /api/tab/${tabID}/applemusic/:trackID)
+    app.delete("/api/tab/:id/applemusic/:trackID", async (c) => {
+        try {
+            await checkLogin(c);
+            const id = c.req.param("id");
+            const trackID = c.req.param("trackID");
+
+            await checkTabExists(id);
+            await removeAppleMusic(id, trackID);
+
+            return c.json({
+                ok: true,
+            });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
     // Serve tab file
     app.get("/api/tab/:id/file", async (c) => {
         try {
@@ -645,6 +708,20 @@ export async function main() {
             const body = await c.req.json();
             await kv.set(["user_setting", session.user.id], body);
             return c.json({ ok: true });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Apple Music Token
+    app.get("/api/apple-music/token", async (c) => {
+        try {
+            await checkLogin(c);
+            const token = Deno.env.get("GIGTAB_APPLE_MUSIC_DEVELOPER_TOKEN") || "";
+            return c.json({
+                ok: true,
+                token,
+            });
         } catch (e) {
             return generalError(c, e);
         }

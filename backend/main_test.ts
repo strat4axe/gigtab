@@ -192,6 +192,73 @@ Deno.test({
     },
 });
 
+Deno.test({
+    name: "Apple Music integration endpoints",
+    sanitizeResources: false,
+    sanitizeOps: false,
+    fn: async () => {
+        // Sign in via auth handler
+        const signInRes = await fetch(`${baseURL}/api/auth/sign-in/email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: "test+ci@example.com", password: "password123" }),
+        });
+        const setCookie = signInRes.headers.get("set-cookie");
+        const cookiePair = setCookie!.split(";", 1)[0];
+
+        // 1. Get developer token
+        const devTokenRes = await fetch(`${baseURL}/api/apple-music/token`, {
+            method: "GET",
+            headers: { Cookie: cookiePair },
+        });
+        assertEquals(devTokenRes.status, 200);
+        const devTokenJson = await devTokenRes.json();
+        assertEquals(devTokenJson.ok, true);
+
+        // 2. Add Apple Music track
+        const id = await createTab(new Uint8Array([7, 8, 9]), "gp", "AM Test", "AM Artist", "am.gp");
+        const addAMRes = await fetch(`${baseURL}/api/tab/${id}/applemusic`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Cookie: cookiePair },
+            body: JSON.stringify({ trackID: "1440854431" }),
+        });
+        assertEquals(addAMRes.status, 200);
+        const addAMJson = await addAMRes.json();
+        assertEquals(addAMJson.ok, true);
+
+        // Verify config
+        let config = await getConfigJSON(id);
+        assertExists(config!.appleMusic);
+        assertEquals(config!.appleMusic.length, 1);
+        assertEquals(config!.appleMusic[0].trackID, "1440854431");
+
+        // 3. Update Apple Music sync points
+        const updateAMRes = await fetch(`${baseURL}/api/tab/${id}/applemusic/1440854431`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Cookie: cookiePair },
+            body: JSON.stringify({
+                syncMethod: "simple",
+                simpleSync: 2500,
+                advancedSync: "",
+            }),
+        });
+        assertEquals(updateAMRes.status, 200);
+
+        config = await getConfigJSON(id);
+        assertEquals(config!.appleMusic[0].simpleSync, 2500);
+
+        // 4. Remove Apple Music track
+        const deleteAMRes = await fetch(`${baseURL}/api/tab/${id}/applemusic/1440854431`, {
+            method: "DELETE",
+            headers: { Cookie: cookiePair },
+        });
+        assertEquals(deleteAMRes.status, 200);
+
+        config = await getConfigJSON(id);
+        assertEquals(config!.appleMusic.length, 0);
+    },
+});
+
 Deno.test.afterAll(async () => {
     closeServer();
 

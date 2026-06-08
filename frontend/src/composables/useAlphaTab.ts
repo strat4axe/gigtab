@@ -19,6 +19,7 @@ export function useAlphaTab(
     const tab = ref<Record<string, any>>({});
     const youtubeList = ref<any[]>([]);
     const audioList = ref<any[]>([]);
+    const appleMusicList = ref<any[]>([]);
     const keySignature = ref("");
     const playbackRange = ref<any>(null);
 
@@ -336,6 +337,7 @@ export function useAlphaTab(
             tab.value = data.tab;
             youtubeList.value = data.youtubeList;
             audioList.value = data.audioList;
+            appleMusicList.value = data.appleMusicList || [];
         }
 
         return data;
@@ -375,6 +377,7 @@ export function useAlphaTab(
         tabID,
         youtubeList,
         audioList,
+        appleMusicList,
         keySignature,
         playbackRange,
         load,

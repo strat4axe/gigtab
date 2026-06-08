@@ -96,6 +96,7 @@ export function initFetchInterceptor() {
                                 ...tab,
                                 youtubeList: data.youtubeList || [],
                                 audioList: data.audioList || [],
+                                appleMusicList: data.appleMusicList || [],
                                 pendingSync: false,
                             });
 
@@ -181,9 +182,10 @@ async function handleOfflineRequest(urlStr: string, input: RequestInfo | URL, in
             JSON.stringify({
                 ok: true,
                 showOpenButtons: false,
-                tab: { ...tab, youtubeList: undefined, audioList: undefined },
+                tab: { ...tab, youtubeList: undefined, audioList: undefined, appleMusicList: undefined },
                 youtubeList: tab.youtubeList || [],
                 audioList: tab.audioList || [],
+                appleMusicList: tab.appleMusicList || [],
                 filePath: "",
             }),
             {
@@ -453,7 +455,65 @@ async function handleOfflineRequest(urlStr: string, input: RequestInfo | URL, in
         });
     }
 
-    // 14. POST /api/auth/sign-out
+    // 14. POST /api/tab/:id/applemusic
+    const appleMusicMatch = path.match(/^\/api\/tab\/([^\/]+)\/applemusic$/);
+    if (appleMusicMatch && method === "POST") {
+        const id = appleMusicMatch[1];
+        const body = JSON.parse(init?.body as string || "{}");
+        const tab = await db.tabs.get(id);
+        if (tab) {
+            if (!tab.appleMusicList) tab.appleMusicList = [];
+            if (!tab.appleMusicList.some((am) => am.trackID === body.trackID)) {
+                tab.appleMusicList.push({ trackID: body.trackID });
+            }
+            tab.updatedAt = new Date().toISOString();
+            tab.pendingSync = true;
+            await db.tabs.put(tab);
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+            headers: { "content-type": "application/json" },
+        });
+    }
+
+    // 15. POST/DELETE /api/tab/:id/applemusic/:trackID
+    const appleMusicTrackMatch = path.match(/^\/api\/tab\/([^\/]+)\/applemusic\/([^\/]+)$/);
+    if (appleMusicTrackMatch) {
+        const id = appleMusicTrackMatch[1];
+        const trackID = decodeURIComponent(appleMusicTrackMatch[2]);
+        const tab = await db.tabs.get(id);
+        if (tab) {
+            if (method === "POST") {
+                const body = JSON.parse(init?.body as string || "{}");
+                if (!tab.appleMusicList) tab.appleMusicList = [];
+                const idx = tab.appleMusicList.findIndex((am) => am.trackID === trackID);
+                if (idx >= 0) {
+                    tab.appleMusicList[idx] = { ...tab.appleMusicList[idx], ...body };
+                } else {
+                    tab.appleMusicList.push({ trackID, ...body });
+                }
+                tab.updatedAt = new Date().toISOString();
+                tab.pendingSync = true;
+                await db.tabs.put(tab);
+            } else if (method === "DELETE") {
+                tab.appleMusicList = (tab.appleMusicList || []).filter((am) => am.trackID !== trackID);
+                tab.updatedAt = new Date().toISOString();
+                tab.pendingSync = true;
+                await db.tabs.put(tab);
+            }
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+            headers: { "content-type": "application/json" },
+        });
+    }
+
+    // 16. GET /api/apple-music/token
+    if (path === "/api/apple-music/token" && method === "GET") {
+        return new Response(JSON.stringify({ ok: true, token: "" }), {
+            headers: { "content-type": "application/json" },
+        });
+    }
+
+    // 17. POST /api/auth/sign-out
     if (path.includes("/sign-out") && method === "POST") {
         await db.profile.clear();
         await db.tabs.clear();
