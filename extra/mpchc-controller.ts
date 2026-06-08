@@ -2,12 +2,12 @@ import { io } from "npm:socket.io-client@~4.8.1";
 import * as cheerio from "npm:cheerio@~1.1.2";
 import "@std/dotenv/load";
 
-const host = Deno.env.get("MYTABS_HOST") || "localhost";
-const port = Deno.env.get("MYTABS_PORT") ? parseInt(Deno.env.get("MYTABS_PORT")!) : 47777;
+const host = Deno.env.get("GIGTAB_HOST") || "localhost";
+const port = Deno.env.get("GIGTAB_PORT") ? parseInt(Deno.env.get("GIGTAB_PORT")!) : 47777;
 
-const email = Deno.env.get("MYTABS_MPCHC_EMAIL");
-const password = Deno.env.get("MYTABS_MPCHC_PASSWORD");
-const mpchcBaseURL = Deno.env.get("MYTABS_MPCHC_BASE_URL") || "http://localhost:13579";
+const email = Deno.env.get("GIGTAB_MPCHC_EMAIL");
+const password = Deno.env.get("GIGTAB_MPCHC_PASSWORD");
+const mpchcBaseURL = Deno.env.get("GIGTAB_MPCHC_BASE_URL") || "http://localhost:13579";
 const baseURL = `http://${host}:${port}`;
 const checkTime = 50;
 const slowCheckTime = 2000;

@@ -9,7 +9,7 @@ import { supportedAudioFormatList } from "./common.ts";
 
 const denoJSONCPath = path.join(getSourceDir(), "./deno.jsonc");
 export const denoJSONC = jsonc.parse(await Deno.readTextFile(denoJSONCPath));
-export const isDemoMode = Deno.env.get("MYTABS_DEMO_MODE") === "true";
+export const isDemoMode = Deno.env.get("GIGTAB_DEMO_MODE") === "true";
 
 let version = "unknown";
 if (denoJSONC && typeof denoJSONC === "object" && !Array.isArray(denoJSONC) && typeof denoJSONC.version === "string") {
@@ -19,8 +19,8 @@ if (denoJSONC && typeof denoJSONC === "object" && !Array.isArray(denoJSONC) && t
 // Parse deno.jsonc
 export const appVersion: string = version;
 
-export const host = Deno.env.get("MYTABS_HOST");
-export const port = Deno.env.get("MYTABS_PORT") ? parseInt(Deno.env.get("MYTABS_PORT")!) : 47777;
+export const host = Deno.env.get("GIGTAB_HOST");
+export const port = Deno.env.get("GIGTAB_PORT") ? parseInt(Deno.env.get("GIGTAB_PORT")!) : 47777;
 
 export async function getDataDir() {
     let dataDir = Deno.env.get("DATA_DIR") || "./data";

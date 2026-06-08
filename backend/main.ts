@@ -95,7 +95,7 @@ export async function main() {
         const url = `http://${address}:${info.port}`;
         console.log(`Server running on ${url}`);
 
-        const launchBrowser = Deno.env.get("MYTABS_LAUNCH_BROWSER");
+        const launchBrowser = Deno.env.get("GIGTAB_LAUNCH_BROWSER");
 
         if (Deno.build.standalone) {
             if (launchBrowser !== "false") {
