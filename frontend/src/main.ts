@@ -1,5 +1,15 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
+import { initFetchInterceptor } from "./services/fetch-interceptor.ts";
+import { runSync } from "./services/sync.ts";
+
+initFetchInterceptor();
+
+// Trigger sync on startup and when connection is restored
+runSync();
+window.addEventListener("online", () => {
+    runSync();
+});
 
 import App from "./App.vue";
 import { FontAwesomeIcon } from "./icon.ts";
