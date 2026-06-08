@@ -12,27 +12,25 @@ const emit = defineEmits<{
     exit: [];
 }>();
 
-const progress = computed(() =>
-    props.endTick > 0 ? (props.currentTick / props.endTick) * 100 : 0
-);
+const progress = computed(() => props.endTick > 0 ? (props.currentTick / props.endTick) * 100 : 0);
 </script>
 
 <template>
     <div class="performance-overlay">
         <!-- Thin progress bar at very top -->
         <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: progress + '%' }" />
+            <div class="progress-fill" :style='{ width: progress + "%" }' />
         </div>
 
         <!-- Tap anywhere to toggle play/pause -->
-        <div class="tap-zone" @click="emit('togglePlay')">
+        <div class="tap-zone" @click='emit("togglePlay")'>
             <transition name="fade">
                 <div v-if="!isPlaying" class="play-indicator">&#9654;</div>
             </transition>
         </div>
 
         <!-- Exit button (small, top-right corner) -->
-        <button class="exit-btn" @click.stop="emit('exit')">EXIT</button>
+        <button class="exit-btn" @click.stop='emit("exit")'>EXIT</button>
     </div>
 </template>
 

@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { type Ref, ref } from "vue";
 import { baseURL, checkFetch, getInstrumentName } from "../app.js";
 import { getKeySignature } from "../util.ts";
 import { convertAlphaTexSyncPoint } from "../app.js";

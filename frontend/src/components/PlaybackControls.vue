@@ -42,12 +42,12 @@ const emit = defineEmits([
 </script>
 
 <template>
-    <button class="btn btn-warning" @click="emit('play-from-highlighted')" v-if="playbackRange">
+    <button class="btn btn-warning" @click='emit("play-from-highlighted")' v-if="playbackRange">
         <font-awesome-icon :icon='["fas", "play"]' />
         Restart
     </button>
 
-    <button class="btn btn-primary" @click="emit('play-pause')" :class="{ active: playing }">
+    <button class="btn btn-primary" @click='emit("play-pause")' :class="{ active: playing }">
         <span v-if="!playing">
             <font-awesome-icon :icon='["fas", "play"]' />
             Play
@@ -58,23 +58,23 @@ const emit = defineEmits([
         </span>
     </button>
 
-    <button class="btn btn-secondary" @click="emit('toggle-loop')" :class="{ active: isLooping }">
+    <button class="btn btn-secondary" @click='emit("toggle-loop")' :class="{ active: isLooping }">
         <font-awesome-icon :icon='["fas", "check"]' v-if="isLooping" />
         Loop
     </button>
 
-    <button class="btn btn-secondary" @click="emit('toggle-count-in')" :class='{ active: enableCountIn, disabled: currentAudio !== "synth" }'>
+    <button class="btn btn-secondary" @click='emit("toggle-count-in")' :class='{ active: enableCountIn, disabled: currentAudio !== "synth" }'>
         <font-awesome-icon :icon='["fas", "check"]' v-if="enableCountIn" />
         Count in
     </button>
 
-    <button class="btn btn-secondary" @click="emit('toggle-metronome')" :class='{ active: enableMetronome, disabled: currentAudio !== "synth" }'>
+    <button class="btn btn-secondary" @click='emit("toggle-metronome")' :class='{ active: enableMetronome, disabled: currentAudio !== "synth" }'>
         <font-awesome-icon :icon='["fas", "check"]' v-if="enableMetronome" />
         Metronome
     </button>
 
     <div class="select-percentage">
-        Speed: <input type="number" class="form-control" min="0" max="1000" step="1" :value="speed" @input="emit('update:speed', Number($event.target.value))" /> (%)
+        Speed: <input type="number" class="form-control" min="0" max="1000" step="1" :value="speed" @input='emit("update:speed", Number($event.target.value))' /> (%)
     </div>
 </template>
 

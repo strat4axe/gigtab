@@ -1,11 +1,11 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { BDropdown, BDropdownDivider, BDropdownItem } from "bootstrap-vue-next";
 import { notify } from "@kyvg/vue3-notification";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { isLoggedIn as checkIsLoggedIn } from "../auth-client.js";
-import { getSetting, connectSocketIO } from "../app.js";
+import { connectSocketIO, getSetting } from "../app.js";
 
 import { useAlphaTab } from "../composables/useAlphaTab.ts";
 import { usePlaybackControl } from "../composables/usePlaybackControl.ts";
@@ -67,10 +67,27 @@ const alphaTabState = useAlphaTab(
 );
 
 const {
-    api, score, tracks, ready, tab, tabID, youtubeList, audioList,
-    keySignature, playbackRange, load, loadMetadata, getFileText, destroyContainer,
-    simpleSync, advancedSync, overrideHiddenStaves, onScoreLoaded, onPlayerFinished,
-    ScrollMode, StaveProfile,
+    api,
+    score,
+    tracks,
+    ready,
+    tab,
+    tabID,
+    youtubeList,
+    audioList,
+    keySignature,
+    playbackRange,
+    load,
+    loadMetadata,
+    getFileText,
+    destroyContainer,
+    simpleSync,
+    advancedSync,
+    overrideHiddenStaves,
+    onScoreLoaded,
+    onPlayerFinished,
+    ScrollMode,
+    StaveProfile,
 } = alphaTabState;
 
 const scrollMode = ref(ScrollMode.Continuous);
@@ -104,8 +121,16 @@ const trackSelection = useTrackSelection(
 );
 
 const {
-    selectedTrack, soloTrackID, muteTrackList, showTrackList,
-    isDrum, hasBackingTrack, changeTrack, toggleSolo, toggleMute, toggleVolume,
+    selectedTrack,
+    soloTrackID,
+    muteTrackList,
+    showTrackList,
+    isDrum,
+    hasBackingTrack,
+    changeTrack,
+    toggleSolo,
+    toggleMute,
+    toggleVolume,
 } = trackSelection;
 
 const playback = usePlaybackControl(
@@ -128,9 +153,20 @@ const playback = usePlaybackControl(
 );
 
 const {
-    playing, enableCountIn, enableMetronome, isLooping, speed,
-    playPause, play, pause, countIn, metronome, loop,
-    playFromHighlightedRange, playFromFirstBarContainingNotes, moveToBar,
+    playing,
+    enableCountIn,
+    enableMetronome,
+    isLooping,
+    speed,
+    playPause,
+    play,
+    pause,
+    countIn,
+    metronome,
+    loop,
+    playFromHighlightedRange,
+    playFromFirstBarContainingNotes,
+    moveToBar,
 } = playback;
 
 const audioSync = useAudioSync(
@@ -149,9 +185,18 @@ const audioSync = useAudioSync(
 );
 
 const {
-    currentAudio, youtube, audio, simpleSyncSecond, showAudioList,
-    syncMethod, audioYoutube, audioFile, audioSynth, audioBackingTrack,
-    setYoutubeRef, setAudioPlayerRef,
+    currentAudio,
+    youtube,
+    audio,
+    simpleSyncSecond,
+    showAudioList,
+    syncMethod,
+    audioYoutube,
+    audioFile,
+    audioSynth,
+    audioBackingTrack,
+    setYoutubeRef,
+    setAudioPlayerRef,
 } = audioSync;
 
 useKeyboardShortcuts({
@@ -285,7 +330,7 @@ function edit() {
 const showSetlist = ref(false);
 
 function navigateToTab(tabId) {
-  router.push(`/tab/${tabId}`);
+    router.push(`/tab/${tabId}`);
 }
 
 // Import Dialog

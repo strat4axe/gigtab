@@ -1,4 +1,4 @@
-import { ref, watch, type Ref } from "vue";
+import { type Ref, ref, watch } from "vue";
 import { ActionBuffer } from "../app.js";
 
 const speedActionBuffer = new ActionBuffer(1000);

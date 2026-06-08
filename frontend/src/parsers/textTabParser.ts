@@ -16,105 +16,105 @@
  */
 
 interface TabColumn {
-  notes: Map<number, number>; // string index (1-6) -> fret number
+    notes: Map<number, number>; // string index (1-6) -> fret number
 }
 
 export function parseTextTab(input: string): string {
-  const lines = input.split("\n");
-  const systems = extractSystems(lines);
-  const columns = systems.flatMap(parseSystem);
+    const lines = input.split("\n");
+    const systems = extractSystems(lines);
+    const columns = systems.flatMap(parseSystem);
 
-  if (columns.length === 0) {
-    throw new Error("No valid tablature found in input");
-  }
+    if (columns.length === 0) {
+        throw new Error("No valid tablature found in input");
+    }
 
-  return columnsToAlphaTex(columns);
+    return columnsToAlphaTex(columns);
 }
 
 function extractSystems(lines: string[]): string[][] {
-  const systems: string[][] = [];
-  let current: string[] = [];
+    const systems: string[][] = [];
+    let current: string[] = [];
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (isTabLine(trimmed)) {
-      current.push(trimmed);
-    } else {
-      if (current.length >= 4) {
-        systems.push(current);
-      }
-      current = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (isTabLine(trimmed)) {
+            current.push(trimmed);
+        } else {
+            if (current.length >= 4) {
+                systems.push(current);
+            }
+            current = [];
+        }
     }
-  }
-  if (current.length >= 4) systems.push(current);
+    if (current.length >= 4) systems.push(current);
 
-  return systems;
+    return systems;
 }
 
 function isTabLine(line: string): boolean {
-  return /^[a-gA-G]?\|[\d\-hpbs/\\|~()x ]+\|?\s*$/.test(line) ||
-         /^\|[\d\-hpbs/\\|~()x ]+\|?\s*$/.test(line);
+    return /^[a-gA-G]?\|[\d\-hpbs/\\|~()x ]+\|?\s*$/.test(line) ||
+        /^\|[\d\-hpbs/\\|~()x ]+\|?\s*$/.test(line);
 }
 
 function parseSystem(systemLines: string[]): TabColumn[] {
-  const rawLines = systemLines.map(line => {
-    const match = line.match(/^[a-gA-G]?\|(.+?)\|?\s*$/);
-    return match ? match[1] : line;
-  });
+    const rawLines = systemLines.map((line) => {
+        const match = line.match(/^[a-gA-G]?\|(.+?)\|?\s*$/);
+        return match ? match[1] : line;
+    });
 
-  const maxLen = Math.max(...rawLines.map(l => l.length));
-  const padded = rawLines.map(l => l.padEnd(maxLen, "-"));
+    const maxLen = Math.max(...rawLines.map((l) => l.length));
+    const padded = rawLines.map((l) => l.padEnd(maxLen, "-"));
 
-  const columns: TabColumn[] = [];
-  const skipCols = new Set<number>();
+    const columns: TabColumn[] = [];
+    const skipCols = new Set<number>();
 
-  for (let col = 0; col < maxLen; col++) {
-    if (skipCols.has(col)) continue;
+    for (let col = 0; col < maxLen; col++) {
+        if (skipCols.has(col)) continue;
 
-    const notes = new Map<number, number>();
-    for (let stringIdx = 0; stringIdx < padded.length; stringIdx++) {
-      const char = padded[stringIdx][col];
-      if (/\d/.test(char)) {
-        let fretStr = char;
-        if (col + 1 < maxLen && /\d/.test(padded[stringIdx][col + 1])) {
-          fretStr += padded[stringIdx][col + 1];
-          skipCols.add(col + 1);
+        const notes = new Map<number, number>();
+        for (let stringIdx = 0; stringIdx < padded.length; stringIdx++) {
+            const char = padded[stringIdx][col];
+            if (/\d/.test(char)) {
+                let fretStr = char;
+                if (col + 1 < maxLen && /\d/.test(padded[stringIdx][col + 1])) {
+                    fretStr += padded[stringIdx][col + 1];
+                    skipCols.add(col + 1);
+                }
+                notes.set(stringIdx + 1, parseInt(fretStr, 10));
+            }
         }
-        notes.set(stringIdx + 1, parseInt(fretStr, 10));
-      }
+        if (notes.size > 0) {
+            columns.push({ notes });
+        }
     }
-    if (notes.size > 0) {
-      columns.push({ notes });
-    }
-  }
 
-  return columns;
+    return columns;
 }
 
 function columnsToAlphaTex(columns: TabColumn[]): string {
-  // alphaTex format reference: https://alphatab.net/docs/alphatex/introduction
-  let tex = "\\title \"Imported Tab\"\n";
-  tex += "\\tempo 120\n";
-  tex += "\\instrument 25\n"; // Steel string acoustic guitar
-  tex += "\\staff{tabs}\n";
-  tex += ".\n"; // Start of music — dot separates metadata from notes
-  tex += ":4 "; // Set default duration to quarter notes
+    // alphaTex format reference: https://alphatab.net/docs/alphatex/introduction
+    let tex = '\\title "Imported Tab"\n';
+    tex += "\\tempo 120\n";
+    tex += "\\instrument 25\n"; // Steel string acoustic guitar
+    tex += "\\staff{tabs}\n";
+    tex += ".\n"; // Start of music — dot separates metadata from notes
+    tex += ":4 "; // Set default duration to quarter notes
 
-  const beatsPerBar = 4;
-  for (let i = 0; i < columns.length; i++) {
-    if (i > 0 && i % beatsPerBar === 0) {
-      tex += " | ";
+    const beatsPerBar = 4;
+    for (let i = 0; i < columns.length; i++) {
+        if (i > 0 && i % beatsPerBar === 0) {
+            tex += " | ";
+        }
+
+        const col = columns[i];
+        if (col.notes.size === 1) {
+            const [stringIdx, fret] = [...col.notes.entries()][0];
+            tex += `${fret}.${stringIdx} `;
+        } else {
+            const noteStrs = [...col.notes.entries()].map(([s, f]) => `${f}.${s}`);
+            tex += `(${noteStrs.join(" ")}) `;
+        }
     }
 
-    const col = columns[i];
-    if (col.notes.size === 1) {
-      const [stringIdx, fret] = [...col.notes.entries()][0];
-      tex += `${fret}.${stringIdx} `;
-    } else {
-      const noteStrs = [...col.notes.entries()].map(([s, f]) => `${f}.${s}`);
-      tex += `(${noteStrs.join(" ")}) `;
-    }
-  }
-
-  return tex.trim();
+    return tex.trim();
 }
