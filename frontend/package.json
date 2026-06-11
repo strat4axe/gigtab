@@ -13,7 +13,10 @@
         "pinia": "~3.0.1",
         "private-ip": "~3.0.2",
         "rollup-plugin-visualizer": "^6.0.3",
-        "zod": "~4.1.11"
+        "dexie": "^4.0.8",
+        "zod": "~4.1.11",
+        "@capacitor/core": "^7.0.0",
+        "@capacitor/android": "^7.0.0"
     },
     "devDependencies": {
         "@coderline/alphatab-vite": "1.8.0",
@@ -37,6 +40,7 @@
         "vite-plugin-pwa": "~0.21.1",
         "socket.io-client": "~4.8.1",
         "bootstrap": "5.3.8",
-        "bootstrap-vue-next": "~0.40.4"
+        "bootstrap-vue-next": "~0.40.4",
+        "@capacitor/cli": "^7.0.0"
     }
 }

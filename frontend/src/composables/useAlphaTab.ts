@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { type Ref, ref } from "vue";
 import { baseURL, checkFetch, getInstrumentName } from "../app.js";
 import { getKeySignature } from "../util.ts";
 import { convertAlphaTexSyncPoint } from "../app.js";
@@ -19,8 +19,13 @@ export function useAlphaTab(
     const tab = ref<Record<string, any>>({});
     const youtubeList = ref<any[]>([]);
     const audioList = ref<any[]>([]);
+    const appleMusicList = ref<any[]>([]);
     const keySignature = ref("");
     const playbackRange = ref<any>(null);
+
+    function isTextFile(filename?: string) {
+        return filename && filename.toLowerCase().endsWith(".txt");
+    }
 
     function getFileURL(tempToken: string) {
         return baseURL + `/api/tab/${tabID.value}/file?tempToken=${tempToken}`;
@@ -127,15 +132,22 @@ export function useAlphaTab(
     }
 
     function simpleSync(offset: number) {
+        // Score may still be loading (e.g. audio source switched early), skip until ready
+        if (!api.value?.score) {
+            return;
+        }
         const syncPoints = [
             { "barIndex": 0, "barOccurence": 0, "barPosition": 0, "millisecondOffset": offset },
         ];
-        api.value!.score.applyFlatSyncPoints(syncPoints);
+        api.value.score.applyFlatSyncPoints(syncPoints);
     }
 
     function advancedSync(syncPointsText: string) {
+        if (!api.value?.score) {
+            return;
+        }
         const syncPoints = convertAlphaTexSyncPoint(syncPointsText);
-        api.value!.score.applyFlatSyncPoints(syncPoints);
+        api.value.score.applyFlatSyncPoints(syncPoints);
         console.log("Applying advanced sync points:", syncPoints);
     }
 
@@ -208,7 +220,6 @@ export function useAlphaTab(
                     },
                 },
                 core: {
-                    file: getFileURL(tempToken),
                     fontDirectory: "/font/",
                     engine: "html5",
                 },
@@ -300,6 +311,11 @@ export function useAlphaTab(
                     onPlayerFinishedCallback();
                 }
             });
+
+            // Load explicitly after all handlers are attached. Loading via the
+            // core.file setting at construction can silently never start for
+            // hidden containers (text tabs), leaving score null forever.
+            api.value.load(isTextFile(tab.value.filename) ? "/empty-bass.gp" : getFileURL(tempToken));
         });
     }
 
@@ -336,6 +352,7 @@ export function useAlphaTab(
             tab.value = data.tab;
             youtubeList.value = data.youtubeList;
             audioList.value = data.audioList;
+            appleMusicList.value = data.appleMusicList || [];
         }
 
         return data;
@@ -375,6 +392,7 @@ export function useAlphaTab(
         tabID,
         youtubeList,
         audioList,
+        appleMusicList,
         keySignature,
         playbackRange,
         load,

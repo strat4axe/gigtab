@@ -24,6 +24,14 @@ Live performance guitar tablature viewer for iPad and web. Forked from [louislam
 
 ## Installation
 
+Support: x64, ARM64
+
+Tip: Youtube videos may not work on a private ip address (e.g. 192.168.x.x), use `localhost` or a public ip/domain instead.
+
+### Windows (exe)
+
+Download the latest release (gigtab-v1.x.x-windows.zip) from [Releases](https://github.com/strat4axe/gigtab/releases/latest) page, unzip it, and run `gigtab.exe`.
+
 ### Docker Compose
 
 ```yaml
@@ -31,8 +39,10 @@ services:
     app:
         image: strat4axe/gigtab:1
         ports:
+            # Host Port:Container Port
             - "47777:47777"
         volumes:
+            # Host Path:Container Path
             - ./data:/app/data
         restart: unless-stopped
 ```
@@ -43,15 +53,27 @@ docker compose up -d
 
 Go to `http://localhost:47777` to access the web UI.
 
-### Deno (Non Docker)
+### Docker
+
+```bash
+docker run -d --name gigtab -p 47777:47777 -v gigtab:/app/data --restart unless-stopped strat4axe/gigtab:1
+```
+
+Go to `http://localhost:47777` to access the web UI.
+
+### Deno (Non Docker) (Linux/Windows/MacOS)
 
 Requirements:
+
 - [Deno](https://deno.land/) 2.4.4 or above
 - Git
 
 ```bash
 git clone https://github.com/strat4axe/gigtab.git
 cd gigtab
+
+# Check out the latest version from Release page
+git checkout 1.X.X --force
 deno task setup
 deno task start
 ```
@@ -63,14 +85,14 @@ Go to `http://localhost:47777` to access the web UI.
 Create a `.env` file to configure:
 
 ```ini
-# Server Host (Default: bind to all interfaces)
-MYTABS_HOST=
+# (string) Server Host (Default: not set, bind to all interfaces)
+GIGTAB_HOST=
 
-# Server Port (Default: 47777)
-MYTABS_PORT=47777
+# (string) Server Port (Default: 47777)
+GIGTAB_PORT=47777
 
-# Launch browser on start (Desktop only) (Default: true)
-MYTABS_LAUNCH_BROWSER=true
+# (boolean) Whether to launch the browser when starting the app (Desktop only) (Default: true)
+GIGTAB_LAUNCH_BROWSER=true
 ```
 
 ## Keyboard Shortcuts

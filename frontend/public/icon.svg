@@ -17,7 +17,7 @@
         font-weight="700"
         font-size="100"
         style="letter-spacing: -2px"
-    >It's</text>
+    >Gig</text>
 
     <text
         x="50%"
@@ -28,5 +28,5 @@
         font-weight="700"
         font-size="100"
         style="letter-spacing: -3px"
-    >MyTabs</text>
+    >Tab</text>
 </svg>

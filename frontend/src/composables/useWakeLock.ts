@@ -1,5 +1,5 @@
 import { onBeforeUnmount } from "vue";
-import { requestWakeLock, releaseWakeLock } from "../app.js";
+import { releaseWakeLock, requestWakeLock } from "../app.js";
 
 export function useWakeLock() {
     let active = false;

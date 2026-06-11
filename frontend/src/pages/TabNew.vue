@@ -15,6 +15,9 @@ export default defineComponent({
             files: [],
             supportedFormatCommaString,
             isUploading: false,
+            pasteTitle: "",
+            pasteArtist: "",
+            pasteContent: "",
         };
     },
     methods: {
@@ -85,6 +88,45 @@ export default defineComponent({
             // Reset Dropzone
             this.isUploading = false;
         },
+        async createFromPaste() {
+            if (!this.pasteContent.trim()) {
+                notify({ text: "Please paste some tab text first", type: "error" });
+                return;
+            }
+
+            this.isUploading = true;
+            try {
+                const title = this.pasteTitle.trim() || "Pasted Tab";
+                const artist = this.pasteArtist.trim();
+
+                const safeName = title.replace(/[\\/:*?"<>|]/g, "").trim() || "tab";
+                const file = new File([this.pasteContent], safeName + ".txt", { type: "text/plain" });
+
+                const formData = new FormData();
+                formData.append("file", file);
+                formData.append("title", title);
+                formData.append("artist", artist);
+
+                const res = await fetch(baseURL + "/api/new-tab", {
+                    method: "POST",
+                    credentials: "include",
+                    body: formData,
+                });
+
+                if (!res.ok) {
+                    const errorData = await res.json().catch(() => ({}));
+                    throw new Error(errorData.msg || "Upload failed");
+                }
+
+                const respData = await res.json();
+                notify({ text: `Created: ${artist ? artist + " - " : ""}${title}`, type: "success" });
+                this.$router.push(`/tab/${respData.id}`);
+            } catch (err) {
+                notify({ text: err.message || "Unknown error", type: "error" });
+            } finally {
+                this.isUploading = false;
+            }
+        },
         dropzoneError(err) {
             console.log(err);
             notify({ text: err.type || "Dropzone error", type: "error" });
@@ -150,6 +192,42 @@ export default defineComponent({
             </li>
         </ul>
 
+        <div class="display-6 mb-4 mt-5">Paste Tab Text</div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <input
+                    type="text"
+                    class="form-control"
+                    placeholder="Title"
+                    v-model="pasteTitle"
+                />
+            </div>
+            <div class="col-md-6">
+                <input
+                    type="text"
+                    class="form-control"
+                    placeholder="Artist (optional)"
+                    v-model="pasteArtist"
+                />
+            </div>
+        </div>
+
+        <textarea
+            class="form-control paste-content"
+            rows="12"
+            placeholder="Paste guitar tab or chord sheet text here..."
+            v-model="pasteContent"
+        ></textarea>
+
+        <button
+            @click="createFromPaste"
+            class="btn btn-primary w-100 mt-3"
+            :disabled="isUploading"
+        >
+            {{ isUploading ? "Creating..." : "Create Tab from Text" }}
+        </button>
+
         <div></div>
 
         <h4 class="mt-5">Free Resources</h4>
@@ -174,5 +252,10 @@ export default defineComponent({
 
 .free-resources li {
     margin-bottom: 15px;
+}
+
+.paste-content {
+    font-family: "Courier New", Courier, monospace;
+    white-space: pre;
 }
 </style>

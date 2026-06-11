@@ -28,6 +28,7 @@
         "build-docker": "deno task build-frontend && deno run --allow-all --env-file extra/build-docker.ts",
         "build-docker-nightly": "deno task build-frontend && docker build -t strat4axe/gigtab:nightly -f Dockerfile . --push",
         "build-frontend": "cd frontend && deno run build",
+        "build-android": "deno task build-frontend && cd frontend && npx cap sync android",
         "start-with-build": "deno task build-frontend && deno task start",
 
         "build-mpchc-controller": "deno compile --allow-all --output=mpchc-controller extra/mpchc-controller.ts"
@@ -37,7 +38,8 @@
 
     "exclude": [
         "frontend",
-        "extra"
+        "extra",
+        ".claude"
     ],
 
     // Run `deno fmt` to format your code

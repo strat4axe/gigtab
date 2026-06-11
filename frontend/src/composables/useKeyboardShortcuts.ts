@@ -1,4 +1,4 @@
-import { onMounted, onBeforeUnmount } from "vue";
+import { onBeforeUnmount, onMounted } from "vue";
 
 export function useKeyboardShortcuts(handlers: {
     playPause: () => void;

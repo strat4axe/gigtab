@@ -54,6 +54,11 @@ export const YoutubeAddDataSchema = z.object({
 });
 export type YoutubeData = z.infer<typeof YoutubeAddDataSchema>;
 
+export const AppleMusicAddDataSchema = z.object({
+    trackID: z.string().min(1),
+});
+export type AppleMusicAddData = z.infer<typeof AppleMusicAddDataSchema>;
+
 export const SyncRequestSchema = z.object({
     syncMethod,
     simpleSync,
@@ -70,9 +75,19 @@ export const AudioDataSchema = z.object({
 
 export type AudioData = z.infer<typeof AudioDataSchema>;
 
+export const AppleMusicSchema = z.object({
+    trackID: z.string().min(1),
+    storefront: z.string().default("us"),
+    syncMethod: syncMethod.default("simple"),
+    simpleSync: simpleSync.default(0),
+    advancedSync: advancedSync.default(""),
+});
+export type AppleMusic = z.infer<typeof AppleMusicSchema>;
+
 export const ConfigJSONSchema = z.object({
     tab: TabInfoSchema,
     audio: z.array(AudioDataSchema).default([]),
     youtube: z.array(YoutubeSchema).default([]),
+    appleMusic: z.array(AppleMusicSchema).default([]),
 });
 export type ConfigJSON = z.infer<typeof ConfigJSONSchema>;

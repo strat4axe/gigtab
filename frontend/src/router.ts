@@ -34,6 +34,10 @@ const routes: RouteRecordRaw[] = [
                         component: TabConfig,
                     },
                     {
+                        path: "/tab/:id/edit/apple-music",
+                        component: TabConfig,
+                    },
+                    {
                         path: "/tab/:id/edit/tab-file",
                         component: TabConfig,
                     },

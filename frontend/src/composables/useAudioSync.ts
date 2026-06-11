@@ -1,17 +1,20 @@
-import { ref, watch, computed, type Ref } from "vue";
+import { computed, type Ref, ref, watch } from "vue";
 import { ActionBuffer, baseURL, checkFetch, generalError } from "../app.js";
 import { notify } from "@kyvg/vue3-notification";
+import { getMusicKitInstance } from "../services/apple-music.ts";
 
 const alphaTab = await import("@coderline/alphatab");
 
 const syncOffsetYoutubeActionBuffer = new ActionBuffer(200);
 const syncOffsetAudioActionBuffer = new ActionBuffer(200);
+const syncOffsetAppleMusicActionBuffer = new ActionBuffer(200);
 
 export function useAudioSync(
     api: Ref<any>,
     tabID: Ref<number | string>,
     youtubeList: Ref<any[]>,
     audioList: Ref<any[]>,
+    appleMusicList: Ref<any[]>,
     simpleSync: (offset: number) => void,
     advancedSync: (syncPointsText: string) => void,
     pause: () => void,
@@ -24,11 +27,13 @@ export function useAudioSync(
     const currentAudio = ref("synth");
     const youtube = ref<Record<string, any>>({});
     const audio = ref<Record<string, any>>({});
+    const appleMusic = ref<Record<string, any>>({});
     const simpleSyncSecond = ref(-1);
     const showAudioList = ref(false);
 
     let audioHandler: any = null;
     let alphaTabYoutubeHandler: any = null;
+    let alphaTabAppleMusicHandler: any = null;
     let youtubePlayer: any = null;
 
     const syncMethod = computed(() => {
@@ -36,6 +41,8 @@ export function useAudioSync(
             return youtube.value.syncMethod;
         } else if (currentAudio.value.startsWith("audio-")) {
             return audio.value.syncMethod;
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            return appleMusic.value.syncMethod;
         } else {
             return undefined;
         }
@@ -58,6 +65,11 @@ export function useAudioSync(
                 return;
             }
             obj = audio.value;
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            if (!appleMusic.value) {
+                return;
+            }
+            obj = appleMusic.value;
         }
 
         pause();
@@ -77,6 +89,13 @@ export function useAudioSync(
             syncOffsetYoutubeActionBuffer.run(() => {
                 if (oldVal !== -1) {
                     saveYoutube();
+                }
+            });
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            api.value.player.output.handler = alphaTabAppleMusicHandler;
+            syncOffsetAppleMusicActionBuffer.run(() => {
+                if (oldVal !== -1) {
+                    saveAppleMusic();
                 }
             });
         } else {
@@ -103,6 +122,13 @@ export function useAudioSync(
         simpleSyncSecond.value = parseFloat((audio.value.simpleSync / 1000).toFixed(2));
     });
 
+    watch(() => appleMusic.value.simpleSync, () => {
+        if (!api.value || !appleMusic.value) {
+            return;
+        }
+        simpleSyncSecond.value = parseFloat((appleMusic.value.simpleSync / 1000).toFixed(2));
+    });
+
     // Switch Audio Source
     watch(currentAudio, async () => {
         console.log("Switching audio to:", currentAudio.value);
@@ -125,6 +151,9 @@ export function useAudioSync(
         } else if (currentAudio.value.startsWith("audio-")) {
             const filename = currentAudio.value.substring(6);
             await initAudio(filename);
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            const trackID = currentAudio.value.substring(11);
+            await initAppleMusic(trackID);
         } else if (currentAudio.value === "none") {
             api.value.player.masterVolume = 0;
             pause();
@@ -533,21 +562,195 @@ export function useAudioSync(
         }
     }
 
+    async function initAppleMusic(trackID: string) {
+        closeAllList();
+
+        let music;
+        try {
+            music = await getMusicKitInstance();
+        } catch (err: any) {
+            notify({
+                type: "error",
+                title: "Apple Music Error",
+                text: err.message || "Failed to initialize Apple Music.",
+            });
+            currentAudio.value = "synth";
+            return;
+        }
+
+        if (!music.isAuthorized) {
+            notify({
+                type: "warning",
+                title: "Authorization Required",
+                text: "Please sign in to Apple Music first in the Settings page.",
+            });
+            currentAudio.value = "synth";
+            return;
+        }
+
+        api.value.settings.player.playerMode = alphaTab.PlayerMode.EnabledSynthesizer;
+        api.value.updateSettings();
+
+        let found = false;
+        for (const am of appleMusicList.value) {
+            if (am.trackID === trackID) {
+                appleMusic.value = am;
+                if (am.syncMethod === "advanced") {
+                    advancedSync(am.advancedSync);
+                } else {
+                    simpleSync(am.simpleSync);
+                }
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            notify({
+                type: "error",
+                title: "Error",
+                text: "Linked Apple Music track not found in config, fallback to synth.",
+            });
+            currentAudio.value = "synth";
+            return;
+        }
+
+        api.value.settings.player.playerMode = alphaTab.PlayerMode.EnabledExternalMedia;
+        api.value.updateSettings();
+
+        if (!alphaTabAppleMusicHandler) {
+            let currentTimeInterval = 0;
+            const onPlaybackStateChange = () => {
+                const state = music.player.state;
+                if (state === 3 || state === "playing") { // Playing
+                    playing.value = true;
+                    api.value?.play();
+                    window.clearInterval(currentTimeInterval);
+                    currentTimeInterval = window.setInterval(() => {
+                        api.value?.player?.output?.updatePosition(music.player.currentPlaybackTime * 1000);
+                    }, 50);
+                } else if (state === 2 || state === "paused") { // Paused
+                    playing.value = false;
+                    api.value?.pause();
+                    window.clearInterval(currentTimeInterval);
+                } else if (state === 5 || state === "completed") { // Completed
+                    playing.value = false;
+                    api.value?.stop();
+                    window.clearInterval(currentTimeInterval);
+                }
+            };
+
+            music.player.addEventListener("playbackStateDidChange", onPlaybackStateChange);
+
+            alphaTabAppleMusicHandler = {
+                get backingTrackDuration() {
+                    return music.player.currentPlaybackDuration * 1000;
+                },
+                get playbackRate() {
+                    return music.player.playbackRate || 1;
+                },
+                set playbackRate(value: number) {
+                    music.player.playbackRate = value;
+                },
+                get masterVolume() {
+                    return music.player.volume;
+                },
+                set masterVolume(value: number) {
+                    music.player.volume = value;
+                },
+                seekTo(time: number) {
+                    music.seekTo(time / 1000);
+                },
+                play() {
+                    music.play();
+                },
+                pause() {
+                    music.pause();
+                },
+            };
+        }
+
+        api.value.player.output.handler = alphaTabAppleMusicHandler;
+
+        await music.setQueue({ song: trackID });
+        pause();
+    }
+
+    function audioAppleMusic(trackID: string) {
+        currentAudio.value = "applemusic-" + trackID;
+        closeAllList();
+    }
+
+    async function saveAppleMusic() {
+        let res;
+        try {
+            res = await fetch(baseURL + `/api/tab/${tabID.value}/applemusic/${appleMusic.value.trackID}`, {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    syncMethod: appleMusic.value.syncMethod,
+                    simpleSync: appleMusic.value.simpleSync,
+                    advancedSync: appleMusic.value.advancedSync,
+                }),
+            });
+
+            await checkFetch(res);
+        } catch (e) {
+            generalError(e);
+        }
+    }
+
+    function getPlaybackTimeAndDuration() {
+        if (currentAudio.value.startsWith("youtube-") && youtubePlayer) {
+            try {
+                return {
+                    time: youtubePlayer.getCurrentTime() * 1000,
+                    duration: youtubePlayer.getDuration() * 1000,
+                };
+            } catch (e) {
+                // Player might not be ready
+            }
+        } else if (currentAudio.value.startsWith("audio-") && _audioPlayerRef) {
+            return {
+                time: _audioPlayerRef.currentTime * 1000,
+                duration: _audioPlayerRef.duration * 1000,
+            };
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            try {
+                const music = (window as any).MusicKit?.getInstance();
+                if (music) {
+                    return {
+                        time: music.player.currentPlaybackTime * 1000,
+                        duration: music.player.currentPlaybackDuration * 1000,
+                    };
+                }
+            } catch (e) {}
+        }
+        return null;
+    }
+
     return {
         currentAudio,
         youtube,
         audio,
+        appleMusic,
         simpleSyncSecond,
         showAudioList,
         syncMethod,
         audioYoutube,
         audioFile,
+        audioAppleMusic,
         audioSynth,
         audioBackingTrack,
         saveYoutube,
         saveAudio,
+        saveAppleMusic,
         setYoutubeRef,
         setAudioPlayerRef,
         initSynth,
+        getPlaybackTimeAndDuration,
     };
 }

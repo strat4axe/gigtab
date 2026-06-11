@@ -1,7 +1,21 @@
 import { checkAudioFormat, checkFilename, flacToOgg, tabDir } from "./util.ts";
 import * as fs from "@std/fs";
 import * as path from "@std/path";
-import { AudioData, AudioDataSchema, ConfigJSON, ConfigJSONSchema, SyncRequest, TabInfo, TabInfoSchema, UpdateTabFav, UpdateTabInfo, Youtube, YoutubeSchema } from "./zod.ts";
+import {
+    AppleMusic,
+    AppleMusicSchema,
+    AudioData,
+    AudioDataSchema,
+    ConfigJSON,
+    ConfigJSONSchema,
+    SyncRequest,
+    TabInfo,
+    TabInfoSchema,
+    UpdateTabFav,
+    UpdateTabInfo,
+    Youtube,
+    YoutubeSchema,
+} from "./zod.ts";
 import { kv } from "./db.ts";
 import sanitize from "sanitize-filename";
 import { supportedAudioFormatList, supportedFormatList } from "./common.ts";
@@ -160,6 +174,7 @@ export async function createTab(tabFileData: Uint8Array, ext: string, title: str
         tab,
         audio: [],
         youtube: [],
+        appleMusic: [],
     };
 
     await writeConfigJSON(id.toString(), info);
@@ -225,6 +240,7 @@ export async function getOrCreateTab(id: string): Promise<TabInfo | null> {
         tab,
         audio: [],
         youtube: [],
+        appleMusic: [],
     };
 
     await writeConfigJSON(id, newConfig);
@@ -458,5 +474,37 @@ export async function updateYoutube(id: string, videoID: string, data: SyncReque
 export async function removeYoutube(id: string, videoID: string) {
     await updateConfigJSON(id, async (config) => {
         config.youtube = config.youtube.filter((y: Youtube) => y.videoID !== videoID);
+    });
+}
+
+export async function addAppleMusic(id: string, trackID: string) {
+    await updateConfigJSON(id, async (config) => {
+        // Ensure initialized
+        if (!config.appleMusic) config.appleMusic = [];
+        if (config.appleMusic.some((am: AppleMusic) => am.trackID === trackID)) {
+            throw new Error("Apple Music track already linked");
+        }
+        config.appleMusic.push(AppleMusicSchema.parse({ trackID }));
+    });
+}
+
+export async function updateAppleMusic(id: string, trackID: string, data: SyncRequest) {
+    await updateConfigJSON(id, async (config) => {
+        if (!config.appleMusic) config.appleMusic = [];
+        const existingIndex = config.appleMusic.findIndex((am: AppleMusic) => am.trackID === trackID);
+        const appleMusicData = AppleMusicSchema.parse({ trackID, ...data });
+
+        if (existingIndex >= 0) {
+            config.appleMusic[existingIndex] = appleMusicData;
+        } else {
+            config.appleMusic.push(appleMusicData);
+        }
+    });
+}
+
+export async function removeAppleMusic(id: string, trackID: string) {
+    await updateConfigJSON(id, async (config) => {
+        if (!config.appleMusic) return;
+        config.appleMusic = config.appleMusic.filter((am: AppleMusic) => am.trackID !== trackID);
     });
 }
