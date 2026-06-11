@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { db, hasUser } from "./db.ts";
+import { db, getFirstUserId, hasUser } from "./db.ts";
 import * as fs from "@std/fs";
 import { randomBytes } from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -73,6 +73,33 @@ export function isDisableSignUp() {
 
 export function disableSignUp() {
     auth.options.emailAndPassword.disableSignUp = true;
+}
+
+/**
+ * Temporarily allow sign up while creating an invited user, then call
+ * disableSignUp() again (use try/finally).
+ */
+export function enableSignUp() {
+    auth.options.emailAndPassword.disableSignUp = false;
+}
+
+/**
+ * The first registered user is the admin
+ */
+export function isAdmin(userId: string): boolean {
+    const firstUserId = getFirstUserId();
+    return firstUserId !== null && firstUserId === userId;
+}
+
+/**
+ * Get current session and require the admin user, throw otherwise
+ */
+export async function getAdminSession(c: Context) {
+    const session = await getCurrentSession(c);
+    if (!isAdmin(session.user.id)) {
+        throw new Error("Admin access required");
+    }
+    return session;
 }
 
 export async function checkLogin(c: Context) {

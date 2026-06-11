@@ -519,12 +519,12 @@ export default defineComponent({
                     <input type="text" class="form-control" id="tabArtist" v-model="tab.artist">
                 </div>
 
-                <!-- Public (Dropdown) -->
+                <!-- Share with band (Dropdown) -->
                 <div class="mb-3">
-                    <label for="tabPublic" class="form-label">Share to public</label>
+                    <label for="tabPublic" class="form-label">Sharing</label>
                     <select class="form-control" id="tabPublic" v-model="tab.public">
-                        <option :value="false">Private</option>
-                        <option :value="true">Public</option>
+                        <option :value="false">Private (only me)</option>
+                        <option :value="true">Shared with band</option>
                     </select>
                 </div>
 

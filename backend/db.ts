@@ -25,6 +25,28 @@ export function isInitDB() {
     return isInitDatabase;
 }
 
+/**
+ * The first registered user is the admin
+ */
+export function getFirstUserId(): string | null {
+    const row = db.prepare("SELECT id FROM user ORDER BY createdAt ASC LIMIT 1").get();
+    if (!row || typeof row.id !== "string") {
+        return null;
+    }
+    return row.id;
+}
+
+/**
+ * List all users (id + name) so the frontend can show tab owners
+ */
+export function getAllUsers(): { id: string; name: string }[] {
+    const rows = db.prepare("SELECT id, name FROM user ORDER BY createdAt ASC").all();
+    return rows.map((row) => ({
+        id: String(row.id),
+        name: String(row.name),
+    }));
+}
+
 export function hasUser() {
     // For demo mode, always return true
     if (isDemoMode) {

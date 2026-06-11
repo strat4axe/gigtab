@@ -26,11 +26,15 @@ export default defineComponent({
             },
             isProcessing: false,
             isAppleMusicConnected: false,
+            isAdmin: false,
+            invites: [] as any[],
+            users: [] as any[],
         };
     },
     mounted() {
         this.setting = getSetting();
         this.checkAppleMusicAuth();
+        this.loadBandInfo();
     },
     methods: {
         /**
@@ -107,6 +111,86 @@ export default defineComponent({
             } catch (e) {
                 generalError(e);
             }
+        },
+
+        async loadBandInfo() {
+            try {
+                const meRes = await fetch(baseURL + "/api/me", { credentials: "include" });
+                const me = await meRes.json();
+                this.isAdmin = !!me.isAdmin;
+
+                if (this.isAdmin) {
+                    await this.loadInvites();
+                }
+
+                const usersRes = await fetch(baseURL + "/api/users", { credentials: "include" });
+                const usersData = await usersRes.json();
+                this.users = usersData.users || [];
+            } catch {
+                // Not logged in or older server; hide the band section
+                this.isAdmin = false;
+            }
+        },
+
+        async loadInvites() {
+            const res = await fetch(baseURL + "/api/invites", { credentials: "include" });
+            const data = await res.json();
+            this.invites = data.invites || [];
+        },
+
+        async createInvite() {
+            try {
+                this.isProcessing = true;
+                const res = await fetch(baseURL + "/api/invites", {
+                    method: "POST",
+                    credentials: "include",
+                });
+                await checkFetch(res);
+                const data = await res.json();
+                await this.loadInvites();
+                await this.copyInvite(data.invite.token);
+            } catch (e) {
+                generalError(e);
+            } finally {
+                this.isProcessing = false;
+            }
+        },
+
+        async copyInvite(token: string) {
+            const link = `${location.origin}/register?invite=${token}`;
+            try {
+                await navigator.clipboard.writeText(link);
+                successMessage("Invite link copied to clipboard");
+            } catch {
+                window.prompt("Copy this invite link:", link);
+            }
+        },
+
+        async revokeInvite(token: string) {
+            if (!window.confirm("Revoke this invite link?")) {
+                return;
+            }
+            try {
+                const res = await fetch(baseURL + `/api/invites/${encodeURIComponent(token)}`, {
+                    method: "DELETE",
+                    credentials: "include",
+                });
+                await checkFetch(res);
+                await this.loadInvites();
+            } catch (e) {
+                generalError(e);
+            }
+        },
+
+        inviteStatus(invite: any): string {
+            if (invite.usedBy) {
+                const user = this.users.find((u: any) => u.id === invite.usedBy);
+                return `Used by ${user ? user.name : "a member"}`;
+            }
+            if (new Date(invite.expiresAt).getTime() < Date.now()) {
+                return "Expired";
+            }
+            return "Active";
         },
 
         async checkAppleMusicAuth() {
@@ -277,6 +361,44 @@ export default defineComponent({
                 </button>
             </div>
         </div>
+
+        <template v-if="isAdmin">
+            <h2 class="mt-5 mb-4">Band Members</h2>
+
+            <div class="mb-3" v-if="users.length > 0">
+                <label class="form-label">Members</label>
+                <ul class="list-group">
+                    <li class="list-group-item" v-for="(user, index) in users" :key="user.id">
+                        {{ user.name }}
+                        <span class="badge bg-secondary ms-2" v-if="index === 0">Admin</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Invite Links</label>
+                <p class="text-secondary">Create an invite link and send it to a band member. Each link can be used once and expires after 7 days.</p>
+
+                <button class="btn btn-primary mb-3" :disabled="isProcessing" @click.prevent="createInvite">
+                    Create Invite Link
+                </button>
+
+                <ul class="list-group" v-if="invites.length > 0">
+                    <li class="list-group-item d-flex align-items-center gap-2" v-for="invite in invites" :key="invite.token">
+                        <span class="badge" :class='inviteStatus(invite) === "Active" ? "bg-success" : "bg-secondary"'>
+                            {{ inviteStatus(invite) }}
+                        </span>
+                        <span class="flex-grow-1 text-truncate font-monospace">{{ invite.token }}</span>
+                        <button class="btn btn-sm btn-secondary" v-if='inviteStatus(invite) === "Active"' @click.prevent="copyInvite(invite.token)">
+                            Copy Link
+                        </button>
+                        <button class="btn btn-sm btn-danger" v-if="!invite.usedBy" @click.prevent="revokeInvite(invite.token)">
+                            Revoke
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </template>
 
         <h2 class="mt-5 mb-4">Others</h2>
 
