@@ -38,7 +38,8 @@
 
     "exclude": [
         "frontend",
-        "extra"
+        "extra",
+        ".claude"
     ],
 
     // Run `deno fmt` to format your code

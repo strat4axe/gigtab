@@ -703,6 +703,35 @@ export function useAudioSync(
         }
     }
 
+    function getPlaybackTimeAndDuration() {
+        if (currentAudio.value.startsWith("youtube-") && youtubePlayer) {
+            try {
+                return {
+                    time: youtubePlayer.getCurrentTime() * 1000,
+                    duration: youtubePlayer.getDuration() * 1000,
+                };
+            } catch (e) {
+                // Player might not be ready
+            }
+        } else if (currentAudio.value.startsWith("audio-") && _audioPlayerRef) {
+            return {
+                time: _audioPlayerRef.currentTime * 1000,
+                duration: _audioPlayerRef.duration * 1000,
+            };
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            try {
+                const music = (window as any).MusicKit?.getInstance();
+                if (music) {
+                    return {
+                        time: music.player.currentPlaybackTime * 1000,
+                        duration: music.player.currentPlaybackDuration * 1000,
+                    };
+                }
+            } catch (e) {}
+        }
+        return null;
+    }
+
     return {
         currentAudio,
         youtube,
@@ -722,5 +751,6 @@ export function useAudioSync(
         setYoutubeRef,
         setAudioPlayerRef,
         initSynth,
+        getPlaybackTimeAndDuration,
     };
 }

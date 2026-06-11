@@ -221,6 +221,180 @@ const endTick = ref(0);
 
 let tickInterval = null;
 
+// Scroll and duration tracking for text tabs
+const durationMinutes = ref(3);
+const durationSeconds = ref(0);
+const songDurationMs = ref(180000);
+
+function updateDuration() {
+    songDurationMs.value = (durationMinutes.value * 60 + durationSeconds.value) * 1000;
+    setConfig("songDurationMs", songDurationMs.value);
+}
+
+let lastUserScrollTime = 0;
+let isProgrammaticScroll = false;
+let lastProgrammaticY = -1;
+
+const onWindowScroll = () => {
+    if (isProgrammaticScroll) {
+        return;
+    }
+    // Scroll events from the media scroll loop land on (or settle near) its last target
+    if (lastProgrammaticY >= 0 && Math.abs(window.scrollY - lastProgrammaticY) <= 3) {
+        return;
+    }
+    lastUserScrollTime = Date.now();
+};
+
+let linearScrollAnimationId = null;
+let linearScrollOrigin = 0;
+let linearScrollRemainingMs = 0;
+let linearScrollSegmentStart = 0;
+
+function startLinearScroll() {
+    if (linearScrollAnimationId) cancelAnimationFrame(linearScrollAnimationId);
+
+    linearScrollOrigin = window.scrollY;
+
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    const currentProgress = maxScroll > 0 ? linearScrollOrigin / maxScroll : 0;
+    linearScrollRemainingMs = songDurationMs.value * (1 - currentProgress);
+
+    linearScrollSegmentStart = performance.now();
+
+    function tick() {
+        if (!playing.value || !isTextFile(tab.value.filename) || (currentAudio.value !== "none" && currentAudio.value !== "synth")) {
+            stopLinearScroll();
+            return;
+        }
+
+        // Skip auto-scrolling if user scrolled recently
+        if (Date.now() - lastUserScrollTime < 3000) {
+            // Reset segment to start from current scroll position and remaining time
+            linearScrollOrigin = window.scrollY;
+            const currentMax = document.documentElement.scrollHeight - window.innerHeight;
+            const progress = currentMax > 0 ? linearScrollOrigin / currentMax : 0;
+            linearScrollRemainingMs = songDurationMs.value * (1 - progress);
+            linearScrollSegmentStart = performance.now();
+        }
+
+        const elapsed = performance.now() - linearScrollSegmentStart;
+        const progress = Math.min(elapsed / Math.max(linearScrollRemainingMs, 1), 1);
+        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        const target = linearScrollOrigin + (maxScroll - linearScrollOrigin) * progress;
+
+        isProgrammaticScroll = true;
+        window.scrollTo({ top: target, behavior: "instant" });
+        setTimeout(() => {
+            isProgrammaticScroll = false;
+        }, 50);
+
+        if (progress < 1) {
+            linearScrollAnimationId = requestAnimationFrame(tick);
+        } else {
+            playing.value = false;
+        }
+    }
+
+    linearScrollAnimationId = requestAnimationFrame(tick);
+}
+
+function stopLinearScroll() {
+    if (linearScrollAnimationId) {
+        cancelAnimationFrame(linearScrollAnimationId);
+        linearScrollAnimationId = null;
+    }
+}
+
+// Media-synced scroll for text tabs: follow the YouTube/audio/Apple Music playhead.
+// Sheet top = sync offset, sheet bottom = end of media.
+// Uses setInterval rather than requestAnimationFrame so tracking continues
+// when the page is briefly hidden (rAF freezes in hidden tabs).
+let mediaScrollInterval = null;
+
+function getCurrentSyncOffsetMs() {
+    if (currentAudio.value.startsWith("youtube-")) {
+        return youtube.value?.simpleSync ?? 0;
+    } else if (currentAudio.value.startsWith("audio-")) {
+        return audio.value?.simpleSync ?? 0;
+    } else if (currentAudio.value.startsWith("applemusic-")) {
+        return appleMusic.value?.simpleSync ?? 0;
+    }
+    return 0;
+}
+
+function startMediaScroll() {
+    if (mediaScrollInterval) clearInterval(mediaScrollInterval);
+
+    mediaScrollInterval = setInterval(() => {
+        if (!playing.value || !isTextFile(tab.value.filename) || currentAudio.value === "none" || currentAudio.value === "synth") {
+            stopMediaScroll();
+            return;
+        }
+
+        if (Date.now() - lastUserScrollTime >= 3000) {
+            const timeAndDuration = getPlaybackTimeAndDuration();
+            if (timeAndDuration && timeAndDuration.duration > 0) {
+                const offsetMs = getCurrentSyncOffsetMs();
+                const span = timeAndDuration.duration - offsetMs;
+                const progress = span > 0 ? Math.min(Math.max((timeAndDuration.time - offsetMs) / span, 0), 1) : 0;
+                const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                if (maxScroll > 0) {
+                    const target = progress * maxScroll;
+                    const current = window.scrollY;
+                    const delta = target - current;
+                    // Ease toward the playhead when far away; track it directly when close
+                    // (sub-pixel lerp steps get rounded away by the browser and stall).
+                    // behavior: "instant" is required — the global CSS scroll-behavior: smooth
+                    // would turn each tick into an animation that the next tick cancels.
+                    const next = Math.abs(delta) > 8 ? current + delta * 0.15 : target;
+                    window.scrollTo({ top: next, behavior: "instant" });
+                    lastProgrammaticY = next;
+                }
+            }
+        }
+    }, 50);
+}
+
+function stopMediaScroll() {
+    if (mediaScrollInterval) {
+        clearInterval(mediaScrollInterval);
+        mediaScrollInterval = null;
+    }
+    lastProgrammaticY = -1;
+}
+
+watch(playing, (newVal) => {
+    if (isTextFile(tab.value.filename)) {
+        if (newVal) {
+            if (currentAudio.value === "none" || currentAudio.value === "synth") {
+                startLinearScroll();
+            } else {
+                startMediaScroll();
+            }
+        } else {
+            stopLinearScroll();
+            stopMediaScroll();
+        }
+    }
+});
+
+watch(currentAudio, (newVal) => {
+    if (isTextFile(tab.value.filename)) {
+        if (playing.value) {
+            if (newVal === "none" || newVal === "synth") {
+                stopMediaScroll();
+                startLinearScroll();
+            } else {
+                stopLinearScroll();
+                startMediaScroll();
+            }
+        }
+    }
+});
+
+const { getPlaybackTimeAndDuration } = audioSync;
+
 function startTickTracking() {
     if (tickInterval) return;
     tickInterval = setInterval(() => {
@@ -244,7 +418,17 @@ function stopTickTracking() {
 // Wire up score loaded callback
 onScoreLoaded((trackID) => {
     // Set Audio source
-    currentAudio.value = getConfig("audio", "synth");
+    let defaultAudio = getConfig("audio", null);
+    if (!defaultAudio) {
+        if (youtubeList.value && youtubeList.value.length > 0) {
+            defaultAudio = "youtube-" + youtubeList.value[0].videoID;
+        } else if (audioList.value && audioList.value.length > 0) {
+            defaultAudio = "audio-" + audioList.value[0].filename;
+        } else {
+            defaultAudio = "synth";
+        }
+    }
+    currentAudio.value = defaultAudio;
 
     // Metronome
     enableMetronome.value = getConfig("enableMetronome", false);
@@ -409,10 +593,16 @@ async function loadTab(trackID) {
             title: tab.value.title,
             artist: tab.value.artist,
         };
-        return;
+
+        // Restore per-tab scroll duration
+        songDurationMs.value = getConfig("songDurationMs", 180000);
+        durationMinutes.value = Math.floor(songDurationMs.value / 60000);
+        durationSeconds.value = Math.round((songDurationMs.value % 60000) / 1000);
+    } else {
+        chordSheetData.value = null;
     }
 
-    // Music file — initialize alphaTab (load will re-use already-fetched metadata)
+    // Music file or empty template for text file — initialize alphaTab
     return await load(trackID, bassTabContainer.value, router);
 }
 
@@ -474,6 +664,7 @@ onMounted(async () => {
             }
         };
         window.addEventListener("click", _onDocumentClick);
+        window.addEventListener("scroll", onWindowScroll);
     } catch (e) {
         notify({
             type: "error",
@@ -492,7 +683,11 @@ onMounted(async () => {
 onBeforeUnmount(() => {
     console.log("Before unmount");
     stopTickTracking();
+    stopLinearScroll();
+    stopMediaScroll();
     fullDestroy();
+
+    window.removeEventListener("scroll", onWindowScroll);
 
     if (_onDocumentClick) {
         window.removeEventListener("click", _onDocumentClick);
@@ -506,20 +701,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="main" v-show="!chordSheetData" :class='{ "light": setting.scoreColor === "light", "performance-mode": performanceMode }'>
+    <div class="main" v-show="!chordSheetData || isTextFile(tab.filename)" :class='{ "light": setting.scoreColor === "light", "performance-mode": performanceMode }'>
         <h1>{{ tab.title }}</h1>
         <h2>{{ tab.artist }}</h2>
         <div class="key-signature badge bg-secondary" v-if="keySignature && setting.showKeySignature">
             {{ keySignature }}
         </div>
-        <div ref="bassTabContainer" v-pre></div>
+
+        <!-- Inline Chord Sheet Content for Text Tabs -->
+        <div v-if="isTextFile(tab.filename)" class="chord-content-inline">
+            <pre v-if="chordSheetData && chordSheetData.rawText" class="chord-text-inline">{{ chordSheetData.rawText }}</pre>
+            <div v-else-if="chordSheetData && chordSheetData.chordHtml" v-html="chordSheetData.chordHtml" class="chord-html-inline"></div>
+        </div>
+
+        <!-- AlphaTab Container for GP files -->
+        <div v-show="!isTextFile(tab.filename)">
+            <div ref="bassTabContainer" v-pre></div>
+        </div>
 
         <!-- Just add a margin, don't let youtube player overlay the tab -->
         <div :class='{ "yt-margin": currentAudio.startsWith(`youtube-`) }'></div>
 
         <div class="toolbar" :class='{ "auto-hide": setting.toolbarAutoHide }' v-show="!performanceMode">
             <div class="scroll">
-                <div class="track-selector selector" ref="trackSelector">
+                <div class="track-selector selector" ref="trackSelector" v-if="!isTextFile(tab.filename)">
                     <div class="button" @click='showList("track")'>
                         <span v-if="tracks.length > 0">{{ tracks[selectedTrack].name }}</span>
                         <span v-else>Loading...</span>
@@ -546,6 +751,30 @@ onBeforeUnmount(() => {
                     @toggle-count-in="countIn()"
                     @toggle-metronome="metronome()"
                 />
+
+                <div class="duration-group ms-2 me-2 d-flex align-items-center" v-if='isTextFile(tab.filename) && (currentAudio === "none" || currentAudio === "synth")'>
+                    <span class="duration-label text-white me-2" style="white-space: nowrap">Duration:</span>
+                    <input
+                        type="number"
+                        class="form-control duration-input"
+                        v-model.number="durationMinutes"
+                        min="0"
+                        max="60"
+                        @change="updateDuration"
+                        style="width: 50px; background-color: #32393e; border: 1px solid #555b60; color: white; text-align: center; height: 35px"
+                    />
+                    <span class="text-white ms-1 me-2">m</span>
+                    <input
+                        type="number"
+                        class="form-control duration-input"
+                        v-model.number="durationSeconds"
+                        min="0"
+                        max="59"
+                        @change="updateDuration"
+                        style="width: 50px; background-color: #32393e; border: 1px solid #555b60; color: white; text-align: center; height: 35px"
+                    />
+                    <span class="text-white ms-1">s</span>
+                </div>
 
                 <button class="btn btn-secondary" @click="showImportDialog = true">Import</button>
 
@@ -650,7 +879,7 @@ onBeforeUnmount(() => {
     />
 
     <ChordSheet
-        v-if="chordSheetData"
+        v-if="chordSheetData && !isTextFile(tab.filename)"
         :chord-html="chordSheetData.chordHtml"
         :raw-text="chordSheetData.rawText"
         :title="chordSheetData.title"
@@ -944,5 +1173,61 @@ $padding: 20px;
 .key-signature {
     position: absolute;
     margin-left: 30px;
+}
+
+.chord-content-inline {
+    padding: 20px 16px;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+    color: #e0e0e0;
+    max-width: 1000px;
+    margin: 20px auto;
+
+    // Light theme overrides
+    .light & {
+        color: #333;
+
+        :deep(.lyrics) {
+            color: #333;
+        }
+    }
+
+    :deep(.chord) {
+        color: #5a9fd9;
+        font-weight: bold;
+    }
+
+    :deep(.lyrics) {
+        color: #e0e0e0;
+    }
+
+    :deep(.row) {
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    :deep(.column) {
+        display: inline-flex;
+        flex-direction: column;
+    }
+}
+
+// Responsive breakpoints
+@media (min-width: 768px) {
+    .chord-content-inline {
+        padding: 24px 32px;
+        font-size: 16px;
+        line-height: 1.8;
+    }
+}
+
+@media (min-width: 1024px) {
+    .chord-content-inline {
+        padding: 32px 48px;
+        font-size: 18px;
+    }
 }
 </style>
