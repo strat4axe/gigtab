@@ -148,7 +148,7 @@ export async function getAllTabs(): Promise<TabInfo[]> {
     return tabs;
 }
 
-export async function createTab(tabFileData: Uint8Array, ext: string, title: string, artist: string, originalFilename: string) {
+export async function createTab(tabFileData: Uint8Array, ext: string, title: string, artist: string, originalFilename: string, ownerId = "") {
     const id = await getNextTabID();
     const dir = path.join(tabDir, id.toString());
 
@@ -168,6 +168,7 @@ export async function createTab(tabFileData: Uint8Array, ext: string, title: str
         createdAt: new Date().toISOString(),
         public: false,
         fav: false,
+        ownerId,
     });
 
     const info: ConfigJSON = {
@@ -351,6 +352,47 @@ export function getTabFolderPath(tab: TabInfo) {
 
 export function getTabFolderFullPath(tab: TabInfo) {
     return path.resolve(getTabFolderPath(tab));
+}
+
+/**
+ * Stamp legacy tabs (no ownerId) with the admin's user id.
+ * Runs on startup, no-op once everything is stamped.
+ */
+export async function migrateOwnership(adminUserId: string) {
+    let count = 0;
+    for await (const entry of Deno.readDir(tabDir)) {
+        if (!entry.isDirectory || entry.name === "deleted") {
+            continue;
+        }
+        try {
+            const config = await getConfigJSON(entry.name, true);
+            if (config && !config.tab.ownerId) {
+                await updateConfigJSON(entry.name, async (cfg) => {
+                    cfg.tab.ownerId = adminUserId;
+                });
+                count++;
+            }
+        } catch (e) {
+            console.warn(`Ownership migration skipped tab ${entry.name}:`, e);
+        }
+    }
+    if (count > 0) {
+        console.log(`Ownership migration: stamped ${count} tab(s) with admin user`);
+    }
+}
+
+/**
+ * Can this user view the tab? Owner, band-shared (public), or admin.
+ */
+export function canReadTab(userId: string, tab: TabInfo, admin: boolean): boolean {
+    return tab.public || admin || !tab.ownerId || tab.ownerId === userId;
+}
+
+/**
+ * Can this user modify the tab? Owner or admin only.
+ */
+export function canWriteTab(userId: string, tab: TabInfo, admin: boolean): boolean {
+    return admin || !tab.ownerId || tab.ownerId === userId;
 }
 
 export async function deleteTab(id: string) {

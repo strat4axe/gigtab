@@ -1,9 +1,10 @@
 import { serve, ServerType } from "@hono/node-server";
 import { Context, Hono } from "@hono/hono";
 import * as fs from "@std/fs";
-import { auth, checkLogin, getCurrentSession, isFinishSetup, isLoggedIn } from "./auth.ts";
-import { AppleMusicAddDataSchema, SignUpSchema, SyncRequestSchema, UpdateTabFavSchema, UpdateTabInfoSchema, YoutubeAddDataSchema } from "./zod.ts";
-import { db, hasUser, isInitDB, kv, migrate } from "./db.ts";
+import { auth, checkLogin, disableSignUp, enableSignUp, getAdminSession, getCurrentSession, isAdmin, isFinishSetup, isLoggedIn } from "./auth.ts";
+import { AppleMusicAddDataSchema, InviteSignUpSchema, SyncRequestSchema, TabInfo, UpdateTabFavSchema, UpdateTabInfoSchema, YoutubeAddDataSchema } from "./zod.ts";
+import { db, getAllUsers, getFirstUserId, hasUser, isInitDB, kv, migrate } from "./db.ts";
+import { createInvite, deleteInvite, getValidInvite, initInviteTable, listInvites, markInviteUsed } from "./invite.ts";
 import { cors } from "@hono/hono/cors";
 import { serveStatic } from "@hono/hono/deno";
 import { appVersion, checkFilename, dataDir, devOriginList, getFrontendDir, getSourceDir, host, isDemoMode, isDev, port, start, tabDir } from "./util.ts";
@@ -13,7 +14,8 @@ import {
     addAppleMusic,
     addAudio,
     addYoutube,
-    checkTabExists,
+    canReadTab,
+    canWriteTab,
     createTab,
     deleteTab,
     fixMissingTab,
@@ -23,6 +25,7 @@ import {
     getTabFilePath,
     getTabFolderPath,
     getTabFullFilePath,
+    migrateOwnership,
     removeAppleMusic,
     removeAudio,
     removeYoutube,
@@ -50,6 +53,13 @@ export async function main() {
     }
 
     await migrate();
+
+    // Multi-user: invite table + stamp legacy tabs with the admin's id
+    initInviteTable();
+    const firstUserId = getFirstUserId();
+    if (firstUserId) {
+        await migrateOwnership(firstUserId);
+    }
 
     const frontendDir = getFrontendDir();
 
@@ -131,20 +141,37 @@ export async function main() {
         return c.json(isFinishSetup());
     });
 
-    // Register Admin account
+    // Register: first user becomes admin, everyone after needs an invite
     app.post("/register", async (c) => {
         try {
-            if (hasUser()) {
-                return c.json({ error: "User already exists" }, 400);
+            const body = InviteSignUpSchema.parse(await c.req.json());
+            const signUpBody = {
+                email: body.email,
+                name: body.name,
+                password: body.password,
+            };
+
+            // First user = admin, no invite needed
+            if (!hasUser()) {
+                const data = await auth.api.signUpEmail({ body: signUpBody });
+                return c.json(data);
             }
 
-            const body = SignUpSchema.parse(await c.req.json());
+            if (!body.inviteToken) {
+                return c.json({ error: "An invite is required to join" }, 400);
+            }
 
-            const data = await auth.api.signUpEmail({
-                body,
-            });
+            const invite = getValidInvite(body.inviteToken);
 
-            return c.json(data);
+            // Sign up is normally disabled once a user exists; allow it just for this call
+            enableSignUp();
+            try {
+                const data = await auth.api.signUpEmail({ body: signUpBody });
+                markInviteUsed(invite.token, data.user.id);
+                return c.json(data);
+            } finally {
+                disableSignUp();
+            }
         } catch (e) {
             if (e instanceof Error) {
                 return c.json({ error: e.message }, 400);
@@ -154,10 +181,75 @@ export async function main() {
         }
     });
 
+    // Check an invite token before showing the register form (no auth: the invitee isn't logged in)
+    app.get("/api/invite-info/:token", (c) => {
+        try {
+            getValidInvite(c.req.param("token"));
+            return c.json({ ok: true });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Invite management (admin only)
+    app.post("/api/invites", async (c) => {
+        try {
+            const session = await getAdminSession(c);
+            const invite = createInvite(session.user.id);
+            return c.json({ ok: true, invite });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    app.get("/api/invites", async (c) => {
+        try {
+            await getAdminSession(c);
+            return c.json({ ok: true, invites: listInvites() });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    app.delete("/api/invites/:token", async (c) => {
+        try {
+            await getAdminSession(c);
+            deleteInvite(c.req.param("token"));
+            return c.json({ ok: true });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Current user info
+    app.get("/api/me", async (c) => {
+        try {
+            const session = await getCurrentSession(c);
+            return c.json({
+                ok: true,
+                id: session.user.id,
+                name: session.user.name,
+                isAdmin: isAdmin(session.user.id),
+            });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // All band members (id + name), used to label shared tabs
+    app.get("/api/users", async (c) => {
+        try {
+            await checkLogin(c);
+            return c.json({ ok: true, users: getAllUsers() });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
     // New Tab
     app.post("/api/new-tab", async (c) => {
         try {
-            await checkLogin(c);
+            const session = await getCurrentSession(c);
 
             const form = await c.req.formData();
             const file = form.get("file");
@@ -189,7 +281,7 @@ export async function main() {
             artist = artist.trim();
 
             const arrayBuffer = await file.arrayBuffer();
-            let id = await createTab(new Uint8Array(arrayBuffer), ext, title, artist, fileName);
+            let id = await createTab(new Uint8Array(arrayBuffer), ext, title, artist, fileName, session.user.id);
 
             return c.json({
                 ok: true,
@@ -203,7 +295,7 @@ export async function main() {
     // Create Empty Tab
     app.post("/api/new-tab/template/:type", async (c) => {
         try {
-            await checkLogin(c);
+            const session = await getCurrentSession(c);
 
             const templateTypeList: Record<string, string> = {
                 bass: "./extra/empty-bass.gp",
@@ -223,7 +315,7 @@ export async function main() {
             const title = "Empty Tab";
             const artist = "";
 
-            const id = await createTab(bytes, ext, title, artist, path.basename(templatePath));
+            const id = await createTab(bytes, ext, title, artist, path.basename(templatePath), session.user.id);
 
             // Append the id to the title
             await updateConfigJSON(id, async (config) => {
@@ -236,12 +328,13 @@ export async function main() {
         }
     });
 
-    // Get Tab List
+    // Get Tab List (own tabs + band-shared tabs; admin sees everything)
     app.get("/api/tabs", async (c) => {
         try {
-            await checkLogin(c);
+            const session = await getCurrentSession(c);
+            const admin = isAdmin(session.user.id);
 
-            const tabList = await getAllTabs();
+            const tabList = (await getAllTabs()).filter((tab) => canReadTab(session.user.id, tab, admin));
 
             return c.json({
                 ok: true,
@@ -262,11 +355,23 @@ export async function main() {
                 throw new Error("Config.json not found");
             }
 
+            // Owner, band-shared (public), or admin; public tabs stay viewable without login
             if (!config.tab.public) {
-                await checkLogin(c);
+                const session = await getCurrentSession(c);
+                if (!canReadTab(session.user.id, config.tab, isAdmin(session.user.id))) {
+                    throw new Error("You don't have access to this tab");
+                }
             }
 
             config = await fixMissingTab(config);
+
+            let canEdit = false;
+            try {
+                const session = await getCurrentSession(c);
+                canEdit = canWriteTab(session.user.id, config.tab, isAdmin(session.user.id));
+            } catch {
+                // Not logged in
+            }
 
             const filePath = (await isLoggedIn(c)) ? getTabFullFilePath(config.tab) : "";
 
@@ -278,6 +383,7 @@ export async function main() {
                 audioList: config.audio,
                 appleMusicList: config.appleMusic || [],
                 filePath,
+                canEdit,
             });
         } catch (e) {
             return generalError(c, e);
@@ -287,13 +393,12 @@ export async function main() {
     // Edit Tab
     app.post("/api/tab/:id", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
             const body = await c.req.json();
             const data = UpdateTabInfoSchema.parse(body);
 
-            const tab = await getTab(id);
+            const tab = await getTabForWrite(c, id);
             await updateTab(tab, data);
             return c.json({
                 ok: true,
@@ -303,16 +408,15 @@ export async function main() {
         }
     });
 
-    // Update Tab Favorite Status
+    // Update Tab Favorite Status (any band member with access, not just the owner)
     app.post("/api/tab/:id/fav", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
             const body = await c.req.json();
             const data = UpdateTabFavSchema.parse(body);
 
-            const tab = await getTab(id);
+            const tab = await getTabForRead(c, id, true);
             await updateTabFav(tab, data);
             return c.json({
                 ok: true,
@@ -325,10 +429,9 @@ export async function main() {
     // Replace Tab File
     app.post("/api/tab/:id/replace", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
-            const tab = await getTab(id);
+            const tab = await getTabForWrite(c, id);
 
             const form = await c.req.formData();
             const file = form.get("file");
@@ -362,9 +465,9 @@ export async function main() {
     // Delete Tab
     app.delete("/api/tab/:id", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
+            await getTabForWrite(c, id);
             await deleteTab(id);
 
             return c.json({
@@ -378,10 +481,9 @@ export async function main() {
     // Add Audio
     app.post("/api/tab/:id/audio", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
-            const tab = await getTab(id);
+            const tab = await getTabForWrite(c, id);
 
             const form = await c.req.formData();
             const file = form.get("file");
@@ -414,13 +516,12 @@ export async function main() {
     // Save Audio (Metadata only)
     app.post("/api/tab/:id/audio/:filename", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
             const body = await c.req.json();
             const data = SyncRequestSchema.parse(body);
 
-            const tab = await getTab(id);
+            const tab = await getTabForWrite(c, id);
             const filename = c.req.param("filename");
 
             await updateAudio(tab, filename, data);
@@ -436,9 +537,8 @@ export async function main() {
     // Remove Audio
     app.delete("/api/tab/:id/audio/:filename", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
-            const tab = await getTab(id);
+            const tab = await getTabForWrite(c, id);
             const filename = c.req.param("filename");
             await removeAudio(tab, filename);
 
@@ -454,10 +554,7 @@ export async function main() {
     app.get("/api/tab/:id/audio/:filename", async (c) => {
         try {
             const id = c.req.param("id");
-            const tab = await getTab(id);
-            if (!tab.public) {
-                await checkLogin(c);
-            }
+            await getTabForRead(c, id);
 
             const filename = c.req.param("filename");
             checkFilename(filename);
@@ -497,13 +594,12 @@ export async function main() {
     // Add Youtube (/api/tab/${tabID}/youtube)
     app.post("/api/tab/:id/youtube", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
             const body = await c.req.json();
             const data = YoutubeAddDataSchema.parse(body);
 
-            await checkTabExists(id);
+            await getTabForWrite(c, id);
             await addYoutube(id, data.videoID);
 
             return c.json({
@@ -517,14 +613,13 @@ export async function main() {
     // Save Youtube config (POST /api/tab/${tabID}/youtube/${videoID})
     app.post("/api/tab/:id/youtube/:videoID", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
             const videoID = c.req.param("videoID");
 
             const body = await c.req.json();
             const data = SyncRequestSchema.parse(body);
 
-            await checkTabExists(id);
+            await getTabForWrite(c, id);
             await updateYoutube(id, videoID, data);
 
             return c.json({
@@ -538,11 +633,10 @@ export async function main() {
     // Remove Youtube (DELETE /api/tab/${tabID}/youtube/${videoID})
     app.delete("/api/tab/:id/youtube/:videoID", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
             const videoID = c.req.param("videoID");
 
-            await checkTabExists(id);
+            await getTabForWrite(c, id);
             await removeYoutube(id, videoID);
 
             return c.json({
@@ -556,13 +650,12 @@ export async function main() {
     // Add Apple Music (POST /api/tab/${tabID}/applemusic)
     app.post("/api/tab/:id/applemusic", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
 
             const body = await c.req.json();
             const data = AppleMusicAddDataSchema.parse(body);
 
-            await checkTabExists(id);
+            await getTabForWrite(c, id);
             await addAppleMusic(id, data.trackID);
 
             return c.json({
@@ -576,14 +669,13 @@ export async function main() {
     // Save Apple Music config (POST /api/tab/${tabID}/applemusic/${trackID})
     app.post("/api/tab/:id/applemusic/:trackID", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
             const trackID = c.req.param("trackID");
 
             const body = await c.req.json();
             const data = SyncRequestSchema.parse(body);
 
-            await checkTabExists(id);
+            await getTabForWrite(c, id);
             await updateAppleMusic(id, trackID, data);
 
             return c.json({
@@ -597,11 +689,10 @@ export async function main() {
     // Remove Apple Music (DELETE /api/tab/${tabID}/applemusic/:trackID)
     app.delete("/api/tab/:id/applemusic/:trackID", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
             const trackID = c.req.param("trackID");
 
-            await checkTabExists(id);
+            await getTabForWrite(c, id);
             await removeAppleMusic(id, trackID);
 
             return c.json({
@@ -621,6 +712,7 @@ export async function main() {
             const tempToken = c.req.query("tempToken");
 
             // Check kv for temp token
+            let tab: TabInfo;
             if (tempToken) {
                 const tokenData = await kv.get(["temp_token", tempToken]);
                 if (!tokenData.value) {
@@ -633,11 +725,12 @@ export async function main() {
 
                 // Delete the token after use
                 await kv.delete(["temp_token", tempToken]);
-            } else {
-                await checkLogin(c);
-            }
 
-            const tab = await getTab(id);
+                // Access was already checked when the temp token was issued
+                tab = await getTab(id);
+            } else {
+                tab = await getTabForRead(c, id);
+            }
             const filePath = getTabFilePath(tab);
 
             // Check if file exists
@@ -667,11 +760,7 @@ export async function main() {
         try {
             const id = c.req.param("id");
 
-            const tab = await getTab(id);
-
-            if (!tab.public) {
-                await checkLogin(c);
-            }
+            const tab = await getTabForRead(c, id);
 
             const token = crypto.randomUUID();
 
@@ -730,9 +819,8 @@ export async function main() {
     // Open folder and Open external (Windows only)
     app.post("/api/tab/:id/open-folder", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
-            const tab = await getTab(id);
+            const tab = await getTabForRead(c, id, true);
 
             if (!Deno.build.standalone || Deno.build.os !== "windows") {
                 throw new Error("Open folder is only supported on Windows");
@@ -748,9 +836,8 @@ export async function main() {
 
     app.post("/api/tab/:id/open-external", async (c) => {
         try {
-            await checkLogin(c);
             const id = c.req.param("id");
-            const tab = await getTab(id);
+            const tab = await getTabForRead(c, id, true);
 
             if (!Deno.build.standalone || Deno.build.os !== "windows") {
                 throw new Error("Open external is only supported on Windows");
@@ -817,6 +904,34 @@ export function closeServer() {
     kv.close();
     db.close();
     console.log("Server closed");
+}
+
+/**
+ * Get a tab the current user may view: owner, band-shared (public), or admin.
+ * Public tabs stay viewable without login (demo mode relies on this) unless requireLogin is set.
+ */
+async function getTabForRead(c: Context, id: string, requireLogin = false): Promise<TabInfo> {
+    const tab = await getTab(id);
+    if (tab.public && !requireLogin) {
+        return tab;
+    }
+    const session = await getCurrentSession(c);
+    if (!canReadTab(session.user.id, tab, isAdmin(session.user.id))) {
+        throw new Error("You don't have access to this tab");
+    }
+    return tab;
+}
+
+/**
+ * Get a tab the current user may modify: owner or admin only.
+ */
+async function getTabForWrite(c: Context, id: string): Promise<TabInfo> {
+    const session = await getCurrentSession(c);
+    const tab = await getTab(id);
+    if (!canWriteTab(session.user.id, tab, isAdmin(session.user.id))) {
+        throw new Error("Only the tab owner can modify this tab");
+    }
+    return tab;
 }
 
 function generalError(c: Context, e: unknown) {

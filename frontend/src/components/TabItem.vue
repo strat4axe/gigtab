@@ -13,6 +13,15 @@ export default defineComponent({
             type: Boolean,
             default: true,
         },
+        // Name of the band member who shared this tab ("" = my own tab)
+        ownerName: {
+            type: String,
+            default: "",
+        },
+        canEdit: {
+            type: Boolean,
+            default: true,
+        },
     },
 
     emits: ["delete", "favToggled"],
@@ -72,15 +81,18 @@ export default defineComponent({
         </button>
 
         <router-link class="info" :to="`/tab/${tab.id}`">
-            <div class="title">{{ tab.title }}</div>
+            <div class="title">
+                {{ tab.title }}
+                <span class="badge bg-info owner-badge" v-if="ownerName">{{ ownerName }}</span>
+            </div>
             <div class="artist" v-if="showArtist">{{ tab.artist }}</div>
         </router-link>
 
-        <button class="btn btn-secondary me-2" @click="handleEdit">
+        <button class="btn btn-secondary me-2" @click="handleEdit" v-if="canEdit">
             Edit
         </button>
 
-        <button class="btn btn-danger" @click="handleDelete">
+        <button class="btn btn-danger" @click="handleDelete" v-if="canEdit">
             Delete
         </button>
     </div>
@@ -125,6 +137,11 @@ export default defineComponent({
 
         .title {
             font-size: 20px;
+        }
+
+        .owner-badge {
+            font-size: 12px;
+            vertical-align: middle;
         }
 
         .artist {

@@ -7,6 +7,11 @@ export const SignUpSchema = z.object({
 });
 export type SignUpData = z.infer<typeof SignUpSchema>;
 
+export const InviteSignUpSchema = SignUpSchema.extend({
+    inviteToken: z.string().min(1).optional(),
+});
+export type InviteSignUpData = z.infer<typeof InviteSignUpSchema>;
+
 const title = z.string().min(1);
 const artist = z.string().min(0);
 const isPublic = z.boolean();
@@ -21,6 +26,8 @@ export const TabInfoSchema = z.object({
     createdAt: z.iso.datetime().default(() => new Date().toISOString()),
     public: isPublic.default(false),
     fav: isFav.default(false),
+    // Empty string = legacy tab from before multi-user; stamped with the admin's id on startup
+    ownerId: z.string().default(""),
 });
 export type TabInfo = z.infer<typeof TabInfoSchema>;
 

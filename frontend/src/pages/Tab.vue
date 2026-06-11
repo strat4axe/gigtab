@@ -38,6 +38,8 @@ const audioPlayer = ref(null);
 
 // Local state
 const isLoggedIn = ref(false);
+// Whether the current user may modify this tab (owner or admin)
+const canEdit = ref(false);
 const setting = ref({});
 const toolbarAutoHide = ref(false);
 const enableBackingTrack = ref(true);
@@ -582,7 +584,8 @@ async function loadTab(trackID) {
     }
 
     // Fetch metadata first to check file type before initializing alphaTab
-    await loadMetadata(router);
+    const meta = await loadMetadata(router);
+    canEdit.value = !!meta?.canEdit;
 
     if (isTextFile(tab.value.filename)) {
         // Text file — fetch raw content and render as monospace text
@@ -782,7 +785,7 @@ onBeforeUnmount(() => {
 
                 <button class="btn btn-secondary" @click="showSetlist = !showSetlist">Setlist</button>
 
-                <div class="btn-edit" v-if="isLoggedIn">
+                <div class="btn-edit" v-if="canEdit">
                     <button class="btn btn-secondary" @click="edit()">
                         Edit
                     </button>
@@ -839,7 +842,7 @@ onBeforeUnmount(() => {
                     <div class="name">No Audio (Mute)</div>
                 </div>
 
-                <div class="ms-4 me-4 mt-3 mb-3" v-if="isLoggedIn">
+                <div class="ms-4 me-4 mt-3 mb-3" v-if="canEdit">
                     <router-link :to="`/tab/${tab.id}/edit/audio`">Add Youtube or Audio File...</router-link>
                 </div>
             </div>
@@ -847,7 +850,7 @@ onBeforeUnmount(() => {
             <!-- USE v-show, because youtube player is not vue  -->
             <div v-show='currentAudio.startsWith("youtube-") || currentAudio.startsWith("audio-") || currentAudio.startsWith("applemusic-")' class="player-container">
                 <!-- Simple sync edit -->
-                <div class="sync-offset ps-3 pe-3 p-2" v-if='syncMethod === "simple" && isLoggedIn'>
+                <div class="sync-offset ps-3 pe-3 p-2" v-if='syncMethod === "simple" && canEdit'>
                     Sync Offset: <input type="number" class="form-control" min="-100000" max="100000" step="0.1" v-model="simpleSyncSecond" /> s
                 </div>
 

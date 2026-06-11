@@ -17,6 +17,8 @@ export default defineComponent({
             isLoggedIn: false,
             searchQuery: "",
             setting: {},
+            me: { id: "", isAdmin: false },
+            users: [],
         };
     },
 
@@ -30,9 +32,15 @@ export default defineComponent({
         }
 
         try {
-            const res = await fetch(baseURL + "/api/tabs", { credentials: "include" });
-            const data = await res.json();
+            const [tabsRes, meRes, usersRes] = await Promise.all([
+                fetch(baseURL + "/api/tabs", { credentials: "include" }),
+                fetch(baseURL + "/api/me", { credentials: "include" }),
+                fetch(baseURL + "/api/users", { credentials: "include" }),
+            ]);
+            const data = await tabsRes.json();
             this.tabList = data.tabs;
+            this.me = await meRes.json();
+            this.users = (await usersRes.json()).users || [];
             this.ready = true;
 
             await this.$nextTick();
@@ -94,6 +102,19 @@ export default defineComponent({
     },
 
     methods: {
+        // Name badge for tabs shared by other band members
+        ownerName(tab) {
+            if (!tab.ownerId || tab.ownerId === this.me.id) {
+                return "";
+            }
+            const user = this.users.find((u) => u.id === tab.ownerId);
+            return user ? user.name : "band member";
+        },
+
+        canEdit(tab) {
+            return this.me.isAdmin || !tab.ownerId || tab.ownerId === this.me.id;
+        },
+
         handleFavToggled() {
             // Force re-render by creating a new array reference
             this.tabList = [...this.tabList];
@@ -139,6 +160,8 @@ export default defineComponent({
                 :key="`fav-${tab.id}`"
                 :tab="tab"
                 :show-artist="true"
+                :owner-name="ownerName(tab)"
+                :can-edit="canEdit(tab)"
                 @delete="deleteTab"
                 @favToggled="handleFavToggled"
             />
@@ -187,6 +210,8 @@ export default defineComponent({
                     :key="tab.id"
                     :tab="tab"
                     :show-artist="false"
+                    :owner-name="ownerName(tab)"
+                    :can-edit="canEdit(tab)"
                     @delete="deleteTab"
                     @favToggled="handleFavToggled"
                 />
@@ -199,6 +224,8 @@ export default defineComponent({
                 :key="tab.id"
                 :tab="tab"
                 :show-artist="true"
+                :owner-name="ownerName(tab)"
+                :can-edit="canEdit(tab)"
                 @delete="deleteTab"
                 @favToggled="handleFavToggled"
             />
