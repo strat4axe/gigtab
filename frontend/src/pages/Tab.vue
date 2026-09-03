@@ -1068,8 +1068,7 @@ $padding: 20px;
     overflow: scroll;
     max-height: calc(100vh - 90px);
 
-    // TODO: No matter how big it is, the tab cursor (z-index: 1000) is always on top of it for unknown reason.
-    z-index: 1;
+    z-index: 1001;
 
     .list-header {
         position: sticky;

@@ -259,6 +259,80 @@ Deno.test({
     },
 });
 
+Deno.test({
+    name: "suggest-youtube API endpoint (HTTP)",
+    sanitizeResources: false,
+    sanitizeOps: false,
+    fn: async () => {
+        // Sign in via auth handler
+        const signInRes = await fetch(`${baseURL}/api/auth/sign-in/email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: "test+ci@example.com", password: "password123" }),
+        });
+        const setCookie = signInRes.headers.get("set-cookie");
+        const cookiePair = setCookie!.split(";", 1)[0];
+
+        // Create a private tab
+        const id = await createTab(new Uint8Array([1, 2, 3]), "gp", "The Bones", "Maren Morris", "bones.gp");
+
+        // Mock html for YouTube search
+        const mockHtml = `
+          <html><head><script>
+          var ytInitialData = {
+            "contents": {
+              "twoColumnSearchResultsRenderer": {
+                "primaryContents": {
+                  "sectionListRenderer": {
+                    "contents": [
+                      {
+                        "itemSectionRenderer": {
+                          "contents": [
+                            {
+                              "videoRenderer": {
+                                "videoId": "vid-oac",
+                                "title": { "runs": [{ "text": "Maren Morris - The Bones" }] },
+                                "ownerText": { "runs": [{ "text": "MarenMorrisVEVO" }] },
+                                "ownerBadges": [{ "metadataBadgeRenderer": { "style": "BADGE_STYLE_TYPE_VERIFIED_ARTIST" } }]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          };
+          </script></head><body></body></html>
+        `;
+
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (url, init) => {
+            if (typeof url === "string" && url.includes("youtube.com")) {
+                return Promise.resolve(new Response(mockHtml, { status: 200, statusText: "OK" }));
+            }
+            return originalFetch(url, init);
+        };
+
+        try {
+            const res = await fetch(`${baseURL}/api/tab/${id}/suggest-youtube`, {
+                method: "GET",
+                headers: { Cookie: cookiePair },
+            });
+            assertEquals(res.status, 200);
+            const json = await res.json();
+            assertEquals(json.ok, true);
+            assertExists(json.suggestions);
+            assertEquals(json.suggestions.length, 1);
+            assertEquals(json.suggestions[0].videoID, "vid-oac");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    },
+});
+
 Deno.test.afterAll(async () => {
     closeServer();
 

@@ -19,6 +19,8 @@ export default defineComponent({
             page: "",
             youtubeURL: "",
             youtubeList: [],
+            youtubeSearchResults: [],
+            isSearchingYoutube: false,
             audioList: [],
             appleMusicList: [],
             appleMusicTrackID: "",
@@ -129,6 +131,56 @@ export default defineComponent({
                 this.youtubeURL = "";
 
                 await this.load();
+            } catch (e) {
+                generalError(e);
+            }
+        },
+
+        async searchYoutube() {
+            this.isSearchingYoutube = true;
+            this.youtubeSearchResults = [];
+            try {
+                const res = await fetch(baseURL + `/api/tab/${this.tabID}/suggest-youtube`, {
+                    credentials: "include",
+                });
+                await checkFetch(res);
+                const data = await res.json();
+                this.youtubeSearchResults = data.suggestions || [];
+                if (this.youtubeSearchResults.length === 0) {
+                    notify({
+                        text: "No suggestions found matching the tab title and artist",
+                        type: "info",
+                    });
+                }
+            } catch (e) {
+                notify({
+                    text: e.message || "Failed to search YouTube suggestions",
+                    type: "error",
+                });
+            } finally {
+                this.isSearchingYoutube = false;
+            }
+        },
+
+        async linkYoutube(videoID) {
+            try {
+                const res = await fetch(baseURL + `/api/tab/${this.tabID}/youtube`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        videoID,
+                    }),
+                });
+                await checkFetch(res);
+                notify({
+                    text: "YouTube video linked successfully",
+                    type: "success",
+                });
+                this.youtubeSearchResults = [];
+                this.$router.push(`/tab/${this.tabID}`);
             } catch (e) {
                 generalError(e);
             }
@@ -545,8 +597,48 @@ export default defineComponent({
             <div class="mb-3">
                 <label for="basic-url" class="form-label">Youtube URL</label>
                 <div class="input-group">
-                    <input type="text" class="form-control" id="basic-url" placeholder="" v-model="youtubeURL">
+                    <input type="text" class="form-control" id="basic-url" placeholder="Enter standard YouTube or YouTube Music URL" v-model="youtubeURL">
                     <button class="btn btn-primary" type="button" @click.prevent="addYoutube()">Add</button>
+                    <button class="btn btn-secondary ms-2" type="button" @click.prevent="searchYoutube()" :disabled="isSearchingYoutube">
+                        <font-awesome-icon :icon='["fas", "magnifying-glass"]' v-if="!isSearchingYoutube" />
+                        <span v-else class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                        {{ isSearchingYoutube ? "Searching..." : "Auto-Suggest Video" }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- YouTube Suggestions Search Results -->
+            <div v-if="youtubeSearchResults.length > 0" class="search-results card bg-dark border-secondary p-3 mb-4">
+                <h5 class="mb-3 text-white">YouTube Suggestions</h5>
+                <div class="list-group">
+                    <div
+                        v-for="video in youtubeSearchResults.slice(0, 3)"
+                        :key="video.videoID"
+                        class="list-group-item bg-dark text-white border-secondary d-flex align-items-center justify-content-between gap-3 p-3 animate-fade-in"
+                    >
+                        <div class="d-flex align-items-center gap-3">
+                            <img
+                                v-if="video.thumbnailUrl"
+                                :src="video.thumbnailUrl"
+                                alt="Thumbnail"
+                                width="120"
+                                height="90"
+                                class="rounded object-fit-cover border border-secondary"
+                            >
+                            <div>
+                                <div class="fw-bold">{{ video.title }}</div>
+                                <div class="text-secondary small d-flex flex-wrap align-items-center gap-2 mt-1">
+                                    <span class="fw-semibold text-light">{{ video.channelTitle }}</span>
+                                    <span v-if="video.isOfficial" class="badge bg-success d-flex align-items-center gap-1">
+                                        <font-awesome-icon :icon='["fas", "check"]' /> Official Artist Channel
+                                    </span>
+                                    <span v-else-if="video.isVerified" class="badge bg-secondary">Verified</span>
+                                    <span v-if="video.duration" class="badge bg-dark border border-secondary">{{ video.duration }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-primary" @click.prevent="linkYoutube(video.videoID)">Link this Video</button>
+                    </div>
                 </div>
             </div>
 

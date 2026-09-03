@@ -42,6 +42,7 @@ import sanitize from "sanitize-filename";
 import "@std/dotenv/load";
 import { socketIO } from "./socket.ts";
 import * as cheerio from "cheerio";
+import { suggestYoutubeVideo } from "./youtube_suggest.ts";
 
 let httpServer: ServerType;
 
@@ -768,6 +769,21 @@ export async function main() {
             return c.json({
                 ok: true,
                 token,
+            });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Suggest YouTube videos for a tab
+    app.get("/api/tab/:id/suggest-youtube", async (c) => {
+        try {
+            const id = c.req.param("id");
+            const tab = await getTabForRead(c, id);
+            const suggestions = await suggestYoutubeVideo(tab.artist, tab.title);
+            return c.json({
+                ok: true,
+                suggestions,
             });
         } catch (e) {
             return generalError(c, e);
