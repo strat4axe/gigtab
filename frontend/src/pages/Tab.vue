@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { BDropdown, BDropdownDivider, BDropdownItem } from "bootstrap-vue-next";
 import { notify } from "@kyvg/vue3-notification";
@@ -53,6 +53,38 @@ const APP_MODE_KEY = "gigtab-mode";
 const appMode = ref(localStorage.getItem(APP_MODE_KEY) === "practice" ? "practice" : "gig");
 // Set when the chosen music source never starts (no connection, blocked video, ...)
 const mediaFailed = ref(false);
+
+// Chord sheet text size, as a multiplier. A per-device choice (an iPad and a phone want different sizes).
+const TEXT_SCALE_KEY = "gigtab-text-scale";
+const TEXT_SCALE_MIN = 0.6;
+const TEXT_SCALE_MAX = 3;
+const textScale = ref(readTextScale());
+
+function readTextScale() {
+    const saved = parseFloat(localStorage.getItem(TEXT_SCALE_KEY) ?? "");
+    return saved >= TEXT_SCALE_MIN && saved <= TEXT_SCALE_MAX ? saved : 1;
+}
+
+async function setTextScale(value) {
+    const next = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, Math.round(value * 10) / 10));
+    if (next === textScale.value) {
+        return;
+    }
+
+    // Stay at the same place in the song while the page changes height
+    const maxBefore = document.documentElement.scrollHeight - window.innerHeight;
+    const progress = maxBefore > 0 ? window.scrollY / maxBefore : 0;
+
+    textScale.value = next;
+    localStorage.setItem(TEXT_SCALE_KEY, String(next));
+    await nextTick();
+
+    const maxAfter = document.documentElement.scrollHeight - window.innerHeight;
+    const target = Math.max(0, progress * maxAfter);
+    window.scrollTo({ top: target, behavior: "instant" });
+    lastProgrammaticY = target;
+    rebaseLinearScroll();
+}
 
 // True when scrolling runs on the saved duration instead of a music playhead
 function usesTimedScroll() {
@@ -423,6 +455,22 @@ let linearScrollOrigin = 0;
 let linearScrollRemainingMs = 0;
 let linearScrollSegmentStart = 0;
 
+// Speed slider as a multiplier (1 = the saved song duration)
+function speedFactor() {
+    const s = Number(speed.value);
+    return s > 0 ? s / 100 : 1;
+}
+
+// Restart the timed scroll from wherever the page is now. Needed whenever the
+// position, page height or speed changes, so the sheet never jumps.
+function rebaseLinearScroll() {
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    linearScrollOrigin = window.scrollY;
+    const progress = maxScroll > 0 ? Math.min(linearScrollOrigin / maxScroll, 1) : 0;
+    linearScrollRemainingMs = songDurationMs.value * (1 - progress);
+    linearScrollSegmentStart = performance.now();
+}
+
 function startLinearScroll(fromClick = false) {
     if (linearScrollAnimationId) cancelAnimationFrame(linearScrollAnimationId);
 
@@ -458,7 +506,7 @@ function startLinearScroll(fromClick = false) {
             linearScrollSegmentStart = performance.now();
         }
 
-        const elapsed = performance.now() - linearScrollSegmentStart;
+        const elapsed = (performance.now() - linearScrollSegmentStart) * speedFactor();
         const progress = Math.min(elapsed / Math.max(linearScrollRemainingMs, 1), 1);
         const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
         const target = linearScrollOrigin + (maxScroll - linearScrollOrigin) * progress;
@@ -578,6 +626,13 @@ watch(playing, (newVal) => {
             stopLinearScroll();
             stopMediaScroll();
         }
+    }
+});
+
+// Changing speed mid-song continues from the current position at the new pace
+watch(speed, () => {
+    if (linearScrollAnimationId) {
+        rebaseLinearScroll();
     }
 });
 
@@ -956,6 +1011,7 @@ onBeforeUnmount(() => {
             v-if="isTextFile(tab.filename)"
             class="chord-content-inline"
             ref="chordContentRef"
+            :style='{ "--text-scale": textScale }'
             title="Click anywhere to sync playback to this position"
         >
             <pre v-if="chordSheetData && chordSheetData.rawText" class="chord-text-inline">{{ chordSheetData.rawText }}</pre>
@@ -1026,12 +1082,25 @@ onBeforeUnmount(() => {
                     v-model:speed="speed"
                     :playbackRange="playbackRange"
                     :currentAudio="currentAudio"
+                    :isText="isTextFile(tab.filename)"
                     @play-pause="playPause"
                     @play-from-highlighted="playFromHighlightedRange()"
                     @toggle-loop="loop()"
                     @toggle-count-in="countIn()"
                     @toggle-metronome="metronome()"
                 />
+
+                <div class="btn-group text-size" role="group" aria-label="Text size" v-if="isTextFile(tab.filename)">
+                    <button class="btn btn-secondary" aria-label="Smaller text" :disabled="textScale <= TEXT_SCALE_MIN" @click="setTextScale(textScale - 0.1)">
+                        A−
+                    </button>
+                    <button class="btn btn-secondary text-size-value" title="Tap to reset text size" @click="setTextScale(1)">
+                        {{ Math.round(textScale * 100) }}%
+                    </button>
+                    <button class="btn btn-secondary text-size-up" aria-label="Larger text" :disabled="textScale >= TEXT_SCALE_MAX" @click="setTextScale(textScale + 0.1)">
+                        A+
+                    </button>
+                </div>
 
                 <div
                     class="duration-group ms-2 me-2 d-flex align-items-center"
@@ -1252,6 +1321,9 @@ $youtube-height: 200px;
         align-items: center;
         flex-grow: 4;
         column-gap: 10px;
+        // Touch devices: swipe the toolbar sideways to reach controls that do not fit
+        overflow-x: auto;
+        scrollbar-width: none;
 
         .btn-edit {
             flex-grow: 1;
@@ -1274,6 +1346,22 @@ $youtube-height: 200px;
             &:hover {
                 color: white;
             }
+        }
+    }
+
+    .text-size {
+        .btn {
+            min-width: 48px;
+        }
+
+        .text-size-value {
+            min-width: 64px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .text-size-up {
+            font-size: 1.15em;
+            font-weight: 600;
         }
     }
 
@@ -1481,7 +1569,7 @@ $padding: 20px;
 .chord-content-inline {
     padding: 20px 16px;
     font-family: "Courier New", Courier, monospace;
-    font-size: 14px;
+    font-size: calc(14px * var(--text-scale, 1));
     line-height: 1.6;
     white-space: pre;
     overflow-x: auto;
@@ -1566,7 +1654,7 @@ $padding: 20px;
 @media (min-width: 768px) {
     .chord-content-inline {
         padding: 24px 32px;
-        font-size: 16px;
+        font-size: calc(16px * var(--text-scale, 1));
         line-height: 1.8;
     }
 }
@@ -1574,7 +1662,7 @@ $padding: 20px;
 @media (min-width: 1024px) {
     .chord-content-inline {
         padding: 32px 48px;
-        font-size: 18px;
+        font-size: calc(18px * var(--text-scale, 1));
     }
 }
 </style>
