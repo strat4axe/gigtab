@@ -12,6 +12,7 @@ const syncOffsetAppleMusicActionBuffer = new ActionBuffer(200);
 export function useAudioSync(
     api: Ref<any>,
     tabID: Ref<number | string>,
+    tab: Ref<Record<string, any>>,
     youtubeList: Ref<any[]>,
     audioList: Ref<any[]>,
     appleMusicList: Ref<any[]>,
@@ -35,6 +36,12 @@ export function useAudioSync(
     let alphaTabYoutubeHandler: any = null;
     let alphaTabAppleMusicHandler: any = null;
     let youtubePlayer: any = null;
+    let lastSeekTime = 0;
+
+    function isTextTab(): boolean {
+        const filename = tab.value?.filename;
+        return !!(filename && filename.toLowerCase().endsWith(".txt"));
+    }
 
     const syncMethod = computed(() => {
         if (currentAudio.value.startsWith("youtube-")) {
@@ -215,15 +222,20 @@ export function useAudioSync(
                     audioPlayer.play();
                 },
                 pause() {
+                    if (isTextTab()) {
+                        return;
+                    }
                     audioPlayer.pause();
                 },
             };
 
             let updateTimer = 0;
             const onTimeUpdate = () => {
-                api.value?.player?.output?.updatePosition(
-                    audioPlayer.currentTime * 1000,
-                );
+                if (!isTextTab()) {
+                    api.value?.player?.output?.updatePosition(
+                        audioPlayer.currentTime * 1000,
+                    );
+                }
             };
 
             audioPlayer.addEventListener("timeupdate", onTimeUpdate);
@@ -231,7 +243,9 @@ export function useAudioSync(
             audioPlayer.addEventListener("play", () => {
                 window.clearInterval(updateTimer);
                 playing.value = true;
-                api.value?.play();
+                if (!isTextTab()) {
+                    api.value?.play();
+                }
                 updateTimer = window.setInterval(onTimeUpdate, 50);
             });
 
@@ -240,9 +254,16 @@ export function useAudioSync(
                     return;
                 }
 
+                if (Date.now() - lastSeekTime < 2500) {
+                    console.log("Ignoring transient audio pause during seek");
+                    return;
+                }
+
                 console.log("[audioPlayer] paused");
                 playing.value = false;
-                api.value?.pause();
+                if (!isTextTab()) {
+                    api.value?.pause();
+                }
                 window.clearInterval(updateTimer);
             });
             audioPlayer.addEventListener("ended", () => {
@@ -413,21 +434,34 @@ export function useAudioSync(
                 "onStateChange": (e: any) => {
                     switch (e.data) {
                         case YT.PlayerState.PLAYING:
+                            window.clearInterval(currentTimeInterval);
                             currentTimeInterval = window.setInterval(() => {
-                                api.value?.player?.output?.updatePosition(player.getCurrentTime() * 1000);
+                                if (!isTextTab()) {
+                                    api.value?.player?.output?.updatePosition(player.getCurrentTime() * 1000);
+                                }
                             }, 50);
                             playing.value = true;
-                            api.value?.play();
+                            if (!isTextTab()) {
+                                api.value?.play();
+                            }
                             break;
                         case YT.PlayerState.ENDED:
                             window.clearInterval(currentTimeInterval);
                             playing.value = false;
-                            api.value?.stop();
+                            if (!isTextTab()) {
+                                api.value?.stop();
+                            }
                             break;
                         case YT.PlayerState.PAUSED:
+                            if (Date.now() - lastSeekTime < 2500) {
+                                console.log("Ignoring transient YouTube PAUSED state during seek");
+                                break;
+                            }
                             window.clearInterval(currentTimeInterval);
                             playing.value = false;
-                            api.value?.pause();
+                            if (!isTextTab()) {
+                                api.value?.pause();
+                            }
                             break;
                         default:
                             break;
@@ -482,6 +516,9 @@ export function useAudioSync(
                 }
             },
             pause() {
+                if (isTextTab()) {
+                    return;
+                }
                 player.pauseVideo();
             },
         };
@@ -624,18 +661,29 @@ export function useAudioSync(
                 const state = music.player.state;
                 if (state === 3 || state === "playing") { // Playing
                     playing.value = true;
-                    api.value?.play();
+                    if (!isTextTab()) {
+                        api.value?.play();
+                    }
                     window.clearInterval(currentTimeInterval);
                     currentTimeInterval = window.setInterval(() => {
-                        api.value?.player?.output?.updatePosition(music.player.currentPlaybackTime * 1000);
+                        if (!isTextTab()) {
+                            api.value?.player?.output?.updatePosition(music.player.currentPlaybackTime * 1000);
+                        }
                     }, 50);
                 } else if (state === 2 || state === "paused") { // Paused
+                    if (Date.now() - lastSeekTime < 2500) {
+                        return;
+                    }
                     playing.value = false;
-                    api.value?.pause();
+                    if (!isTextTab()) {
+                        api.value?.pause();
+                    }
                     window.clearInterval(currentTimeInterval);
                 } else if (state === 5 || state === "completed") { // Completed
                     playing.value = false;
-                    api.value?.stop();
+                    if (!isTextTab()) {
+                        api.value?.stop();
+                    }
                     window.clearInterval(currentTimeInterval);
                 }
             };
@@ -665,6 +713,9 @@ export function useAudioSync(
                     music.play();
                 },
                 pause() {
+                    if (isTextTab()) {
+                        return;
+                    }
                     music.pause();
                 },
             };
@@ -732,6 +783,85 @@ export function useAudioSync(
         return null;
     }
 
+    function seekTo(timeMs: number, keepPlaying = true) {
+        lastSeekTime = Date.now();
+
+        if (currentAudio.value.startsWith("youtube-")) {
+            if (youtubePlayer && typeof youtubePlayer.seekTo === "function") {
+                youtubePlayer.seekTo(timeMs / 1000, true);
+                if (keepPlaying || playing.value) {
+                    youtubePlayer.playVideo();
+                    playing.value = true;
+                }
+            }
+        } else if (currentAudio.value.startsWith("audio-")) {
+            if (_audioPlayerRef) {
+                _audioPlayerRef.currentTime = timeMs / 1000;
+                if (keepPlaying || playing.value) {
+                    _audioPlayerRef.play().catch(() => {});
+                    playing.value = true;
+                }
+            }
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            try {
+                const music = (window as any).MusicKit?.getInstance();
+                if (music) {
+                    music.seekTo(timeMs / 1000);
+                    if (keepPlaying || playing.value) {
+                        music.play().catch(() => {});
+                        playing.value = true;
+                    }
+                }
+            } catch (e) {}
+        } else if (currentAudio.value === "synth" || currentAudio.value === "backingTrack") {
+            if (api.value) {
+                api.value.timePosition = timeMs;
+                if (keepPlaying || playing.value) {
+                    api.value.play();
+                    playing.value = true;
+                }
+            }
+        }
+    }
+
+    function getCurrentSyncOffsetMs(): number {
+        if (currentAudio.value.startsWith("youtube-")) {
+            return youtube.value?.simpleSync ?? 0;
+        } else if (currentAudio.value.startsWith("audio-")) {
+            return audio.value?.simpleSync ?? 0;
+        } else if (currentAudio.value.startsWith("applemusic-")) {
+            return appleMusic.value?.simpleSync ?? 0;
+        }
+        return 0;
+    }
+
+    function seekByProgress(progress: number, keepPlaying = true): number | null {
+        const clampedProgress = Math.max(0, Math.min(progress, 1));
+        const timeAndDuration = getPlaybackTimeAndDuration();
+
+        if (timeAndDuration && timeAndDuration.duration > 0) {
+            const offsetMs = getCurrentSyncOffsetMs();
+            const span = Math.max(timeAndDuration.duration - offsetMs, 0);
+            const targetTimeMs = Math.max(0, Math.min(offsetMs + clampedProgress * span, timeAndDuration.duration));
+            seekTo(targetTimeMs, keepPlaying);
+            return targetTimeMs;
+        } else if (api.value?.score?.masterBars?.length > 0) {
+            const masterBars = api.value.score.masterBars;
+            const last = masterBars[masterBars.length - 1];
+            const endTick = (last.start ?? 0) + (last.calculateDuration?.() ?? 0);
+            if (endTick > 0) {
+                const targetTick = Math.round(clampedProgress * endTick);
+                api.value.tickPosition = targetTick;
+                if (keepPlaying || playing.value) {
+                    api.value.play();
+                    playing.value = true;
+                }
+                return api.value.timePosition ?? null;
+            }
+        }
+        return null;
+    }
+
     return {
         currentAudio,
         youtube,
@@ -752,5 +882,8 @@ export function useAudioSync(
         setAudioPlayerRef,
         initSynth,
         getPlaybackTimeAndDuration,
+        getCurrentSyncOffsetMs,
+        seekTo,
+        seekByProgress,
     };
 }
