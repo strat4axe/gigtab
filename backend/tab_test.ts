@@ -253,6 +253,18 @@ Deno.test("updateTab", async () => {
     assertEquals(tab.title, "Updated Title");
     assertEquals(tab.artist, "Updated Artist");
     assertEquals(tab.public, true);
+    assertEquals(tab.durationMs, 0);
+
+    // Song duration is stored when sent...
+    await updateTab(tab, { title: "Updated Title", artist: "Updated Artist", public: true, durationMs: 215000 });
+    tab = await getTab(id);
+    assertEquals(tab.durationMs, 215000);
+
+    // ...and left alone when an update doesn't include it
+    await updateTab(tab, { title: "Renamed", artist: "Updated Artist", public: true });
+    tab = await getTab(id);
+    assertEquals(tab.title, "Renamed");
+    assertEquals(tab.durationMs, 215000);
 });
 
 Deno.test("updateTabFav", async () => {

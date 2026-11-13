@@ -276,6 +276,9 @@ async function handleOfflineRequest(urlStr: string, input: RequestInfo | URL, in
             tab.title = body.title;
             tab.artist = body.artist;
             tab.public = body.public;
+            if (typeof body.durationMs === "number") {
+                tab.durationMs = body.durationMs;
+            }
             tab.pendingSync = true;
             tab.updatedAt = new Date().toISOString();
             await db.tabs.put(tab);

@@ -5,7 +5,7 @@ import { BDropdown, BDropdownDivider, BDropdownItem } from "bootstrap-vue-next";
 import { notify } from "@kyvg/vue3-notification";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { isLoggedIn as checkIsLoggedIn } from "../auth-client.js";
-import { connectSocketIO, getSetting } from "../app.js";
+import { baseURL, connectSocketIO, getSetting } from "../app.js";
 
 import { useAlphaTab } from "../composables/useAlphaTab.ts";
 import { usePlaybackControl } from "../composables/usePlaybackControl.ts";
@@ -46,6 +46,26 @@ const canEdit = ref(false);
 const setting = ref({});
 const toolbarAutoHide = ref(false);
 const enableBackingTrack = ref(true);
+
+// Gig mode (default): no music; the sheet scrolls on the saved song duration.
+// Practice mode: play along with YouTube / audio / Apple Music, which then drives the scroll.
+const APP_MODE_KEY = "gigtab-mode";
+const appMode = ref(localStorage.getItem(APP_MODE_KEY) === "practice" ? "practice" : "gig");
+// Set when the chosen music source never starts (no connection, blocked video, ...)
+const mediaFailed = ref(false);
+
+// True when scrolling runs on the saved duration instead of a music playhead
+function usesTimedScroll() {
+    return appMode.value === "gig" || mediaFailed.value || currentAudio.value === "none" || currentAudio.value === "synth";
+}
+
+// Gig mode forces "no audio"; that must not overwrite the source chosen for practice
+function setAudioSyncConfig(key, value) {
+    if (key === "audio" && appMode.value === "gig") {
+        return;
+    }
+    setConfig(key, value);
+}
 
 // Config helpers (stay in Tab.vue - they use tabID)
 function setConfig(key, value) {
@@ -189,7 +209,7 @@ const audioSync = useAudioSync(
     playing,
     isLooping,
     closeAllList,
-    setConfig,
+    setAudioSyncConfig,
 );
 
 const {
@@ -237,8 +257,49 @@ const durationSeconds = ref(0);
 const songDurationMs = ref(180000);
 
 function updateDuration() {
-    songDurationMs.value = (durationMinutes.value * 60 + durationSeconds.value) * 1000;
-    setConfig("songDurationMs", songDurationMs.value);
+    setSongDuration((durationMinutes.value * 60 + durationSeconds.value) * 1000, true);
+}
+
+let durationSaveTimer = null;
+
+// Set the scroll duration. With save = true it is kept on this device and,
+// if we may edit the tab, stored with the tab so every device gets it.
+function setSongDuration(ms, save = false) {
+    ms = Math.max(1000, Math.round(ms));
+    songDurationMs.value = ms;
+    durationMinutes.value = Math.floor(ms / 60000);
+    durationSeconds.value = Math.round((ms % 60000) / 1000);
+
+    if (!save) {
+        return;
+    }
+    setConfig("songDurationMs", ms);
+
+    if (!canEdit.value || !tab.value?.title) {
+        return;
+    }
+    // Capture the tab now: the timer may fire after navigating to another song
+    const id = tabID.value;
+    const body = JSON.stringify({
+        title: tab.value.title,
+        artist: tab.value.artist ?? "",
+        public: !!tab.value.public,
+        durationMs: ms,
+    });
+    tab.value.durationMs = ms;
+    clearTimeout(durationSaveTimer);
+    durationSaveTimer = setTimeout(async () => {
+        try {
+            await fetch(baseURL + `/api/tab/${id}`, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body,
+            });
+        } catch (e) {
+            console.warn("Could not save song duration:", e);
+        }
+    }, 600);
 }
 
 let lastUserScrollTime = 0;
@@ -280,7 +341,7 @@ function handleUserScrolled() {
     // Seek external media or AlphaTab synth (preserve playing state)
     seekByProgress(progress, playing.value);
 
-    if (isTextFile(tab.value.filename) && (currentAudio.value === "none" || currentAudio.value === "synth")) {
+    if (isTextFile(tab.value.filename) && usesTimedScroll()) {
         linearScrollOrigin = window.scrollY;
         linearScrollRemainingMs = songDurationMs.value * (1 - progress);
         linearScrollSegmentStart = performance.now();
@@ -342,7 +403,7 @@ function handleTabClick(event) {
     const targetTimeMs = seekByProgress(progress, true);
     playing.value = true;
 
-    if (isText && (currentAudio.value === "none" || currentAudio.value === "synth")) {
+    if (isText && usesTimedScroll()) {
         const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
         linearScrollOrigin = maxScroll > 0 ? progress * maxScroll : 0;
         linearScrollRemainingMs = songDurationMs.value * (1 - progress);
@@ -375,7 +436,7 @@ function startLinearScroll(fromClick = false) {
     }
 
     function tick() {
-        if (!playing.value || !isTextFile(tab.value.filename) || (currentAudio.value !== "none" && currentAudio.value !== "synth")) {
+        if (!playing.value || !isTextFile(tab.value.filename) || !usesTimedScroll()) {
             stopLinearScroll();
             return;
         }
@@ -427,13 +488,43 @@ function stopLinearScroll() {
 // Uses setInterval rather than requestAnimationFrame so tracking continues
 // when the page is briefly hidden (rAF freezes in hidden tabs).
 let mediaScrollInterval = null;
+// When we started waiting for the music source to report a playhead (0 = not waiting)
+let mediaWaitingSince = 0;
+const MEDIA_START_TIMEOUT_MS = 6000;
 
 function startMediaScroll() {
     if (mediaScrollInterval) clearInterval(mediaScrollInterval);
+    mediaWaitingSince = 0;
 
     mediaScrollInterval = setInterval(() => {
-        if (!playing.value || !isTextFile(tab.value.filename) || currentAudio.value === "none" || currentAudio.value === "synth") {
+        if (!playing.value || !isTextFile(tab.value.filename) || usesTimedScroll()) {
             stopMediaScroll();
+            return;
+        }
+
+        const timeAndDuration = getPlaybackTimeAndDuration();
+        const mediaReady = !!timeAndDuration && timeAndDuration.duration > 0;
+
+        if (mediaReady) {
+            mediaWaitingSince = 0;
+
+            // Remember the song length so Gig mode can scroll without the music
+            const span = Math.round(timeAndDuration.duration - getCurrentSyncOffsetMs());
+            if (span > 1000 && Math.abs(span - songDurationMs.value) > 1000) {
+                setSongDuration(span, true);
+            }
+        } else if (!mediaWaitingSince) {
+            mediaWaitingSince = Date.now();
+        } else if (Date.now() - mediaWaitingSince > MEDIA_START_TIMEOUT_MS) {
+            // The music never started: keep the sheet moving on the saved duration instead
+            mediaFailed.value = true;
+            stopMediaScroll();
+            startLinearScroll();
+            notify({
+                type: "warn",
+                title: "Music not available",
+                text: "Scrolling on the saved song duration instead.",
+            });
             return;
         }
 
@@ -444,8 +535,7 @@ function startMediaScroll() {
         }
 
         if (Date.now() - lastUserScrollTime >= 3000) {
-            const timeAndDuration = getPlaybackTimeAndDuration();
-            if (timeAndDuration && timeAndDuration.duration > 0) {
+            if (mediaReady) {
                 const offsetMs = getCurrentSyncOffsetMs();
                 const span = timeAndDuration.duration - offsetMs;
                 const progress = span > 0 ? Math.min(Math.max((timeAndDuration.time - offsetMs) / span, 0), 1) : 0;
@@ -478,7 +568,7 @@ function stopMediaScroll() {
 watch(playing, (newVal) => {
     if (isTextFile(tab.value.filename)) {
         if (newVal) {
-            if (currentAudio.value === "none" || currentAudio.value === "synth") {
+            if (usesTimedScroll()) {
                 startLinearScroll();
             } else {
                 startMediaScroll();
@@ -491,9 +581,12 @@ watch(playing, (newVal) => {
 });
 
 watch(currentAudio, (newVal) => {
+    // A newly chosen source gets a fresh chance to start
+    mediaFailed.value = false;
+
     if (isTextFile(tab.value.filename)) {
         if (playing.value) {
-            if (newVal === "none" || newVal === "synth") {
+            if (usesTimedScroll()) {
                 stopMediaScroll();
                 startLinearScroll();
             } else {
@@ -528,7 +621,10 @@ function stopTickTracking() {
 onScoreLoaded((trackID) => {
     // Set Audio source
     let defaultAudio = getConfig("audio", null);
-    if (!defaultAudio) {
+    if (appMode.value === "gig") {
+        // No music at a gig: nothing to load, nothing that can fail
+        defaultAudio = "none";
+    } else if (!defaultAudio || (defaultAudio === "none" && isTextFile(tab.value.filename))) {
         if (youtubeList.value && youtubeList.value.length > 0) {
             defaultAudio = "youtube-" + youtubeList.value[0].videoID;
         } else if (audioList.value && audioList.value.length > 0) {
@@ -685,10 +781,21 @@ function isTextFile(filename) {
     return filename && filename.toLowerCase().endsWith(".txt");
 }
 
+function setAppMode(mode) {
+    if (appMode.value === mode) {
+        return;
+    }
+    appMode.value = mode;
+    localStorage.setItem(APP_MODE_KEY, mode);
+    // A full reload guarantees no music player from Practice mode is left running in Gig mode
+    window.location.reload();
+}
+
 async function loadTab(trackID) {
     if (api.value) {
         fullDestroy();
     }
+    mediaFailed.value = false;
 
     // Fetch metadata first to check file type before initializing alphaTab
     const meta = await loadMetadata(router);
@@ -704,10 +811,8 @@ async function loadTab(trackID) {
             artist: tab.value.artist,
         };
 
-        // Restore per-tab scroll duration
-        songDurationMs.value = getConfig("songDurationMs", 180000);
-        durationMinutes.value = Math.floor(songDurationMs.value / 60000);
-        durationSeconds.value = Math.round((songDurationMs.value % 60000) / 1000);
+        // Scroll duration: stored with the tab (shared by every device), else the value kept on this device
+        setSongDuration(tab.value.durationMs || getConfig("songDurationMs", 180000));
     } else {
         chordSheetData.value = null;
     }
@@ -873,7 +978,28 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div class="audio-selector selector" ref="audioSelector">
+                <div class="btn-group mode-switch" role="group" aria-label="Mode">
+                    <button
+                        class="btn"
+                        :class='appMode === "gig" ? "btn-primary" : "btn-secondary"'
+                        :aria-pressed='appMode === "gig"'
+                        title="No music: scrolls on the saved song duration"
+                        @click='setAppMode("gig")'
+                    >
+                        Gig
+                    </button>
+                    <button
+                        class="btn"
+                        :class='appMode === "practice" ? "btn-primary" : "btn-secondary"'
+                        :aria-pressed='appMode === "practice"'
+                        title="Play along with YouTube or audio"
+                        @click='setAppMode("practice")'
+                    >
+                        Practice
+                    </button>
+                </div>
+
+                <div class="audio-selector selector" ref="audioSelector" v-show='appMode === "practice"'>
                     <div class="button" @click='showList("audio")'>
                         Audio
                     </div>
@@ -894,7 +1020,10 @@ onBeforeUnmount(() => {
                     @toggle-metronome="metronome()"
                 />
 
-                <div class="duration-group ms-2 me-2 d-flex align-items-center" v-if='isTextFile(tab.filename) && (currentAudio === "none" || currentAudio === "synth")'>
+                <div
+                    class="duration-group ms-2 me-2 d-flex align-items-center"
+                    v-if='isTextFile(tab.filename) && (appMode === "gig" || mediaFailed || currentAudio === "none" || currentAudio === "synth")'
+                >
                     <span class="duration-label text-white me-2" style="white-space: nowrap">Duration:</span>
                     <input
                         type="number"

@@ -16,6 +16,8 @@ const title = z.string().min(1);
 const artist = z.string().min(0);
 const isPublic = z.boolean();
 const isFav = z.boolean();
+// Song length used for timed scrolling, in milliseconds. 0 = not set.
+const durationMs = z.number().int().min(0).max(4 * 60 * 60 * 1000);
 
 export const TabInfoSchema = z.object({
     id: z.string().default("-1"),
@@ -28,6 +30,7 @@ export const TabInfoSchema = z.object({
     fav: isFav.default(false),
     // Empty string = legacy tab from before multi-user; stamped with the admin's id on startup
     ownerId: z.string().default(""),
+    durationMs: durationMs.default(0),
 });
 export type TabInfo = z.infer<typeof TabInfoSchema>;
 
@@ -35,6 +38,8 @@ export const UpdateTabInfoSchema = z.object({
     title,
     artist,
     public: isPublic,
+    // Optional so older clients that don't send it leave the stored value alone
+    durationMs: durationMs.optional(),
 });
 export type UpdateTabInfo = z.infer<typeof UpdateTabInfoSchema>;
 

@@ -123,6 +123,7 @@ export async function runSync(): Promise<void> {
                                 title: tab.title,
                                 artist: tab.artist,
                                 public: tab.public,
+                                ...(typeof tab.durationMs === "number" ? { durationMs: tab.durationMs } : {}),
                             }),
                             credentials: "include",
                         });

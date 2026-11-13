@@ -8,6 +8,7 @@ export interface CachedTab {
     public: boolean;
     favorite: boolean;
     updatedAt: string; // ISO timestamp
+    durationMs?: number; // song length for timed scrolling, 0/undefined = not set
     localOnly?: boolean; // tab created offline that doesn't exist on server yet
     pendingSync?: boolean; // tab created or modified offline and needs to be synced
     youtubeList?: any[];
