@@ -98,3 +98,23 @@ export const ConfigJSONSchema = z.object({
     appleMusic: z.array(AppleMusicSchema).default([]),
 });
 export type ConfigJSON = z.infer<typeof ConfigJSONSchema>;
+
+export const SetlistItemSchema = z.object({
+    id: z.string().min(1).max(100),
+    tabId: z.string().min(1).max(100),
+    title: z.string().max(500).default(""),
+    artist: z.string().max(500).default(""),
+    order: z.number().int().min(0).default(0),
+});
+export type SetlistItem = z.infer<typeof SetlistItemSchema>;
+
+export const SetlistSchema = z.object({
+    id: z.string().min(1).max(100),
+    name: z.string().min(1).max(200),
+    items: z.array(SetlistItemSchema).max(500).default([]),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+    // Tombstone: deleted setlists are kept so the deletion reaches offline devices
+    deleted: z.boolean().default(false),
+});
+export type Setlist = z.infer<typeof SetlistSchema>;

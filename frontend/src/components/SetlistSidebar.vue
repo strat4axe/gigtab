@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useSetlistStore } from "../stores/setlistStore";
+import { useSetlistOffline } from "../composables/useSetlistOffline.ts";
 
 const props = defineProps<{
     currentTabId: string;
@@ -14,6 +15,7 @@ const emit = defineEmits<{
 }>();
 
 const setlistStore = useSetlistStore();
+const offline = useSetlistOffline();
 
 const newSetlistName = ref("");
 const showCreateForm = ref(false);
@@ -24,6 +26,13 @@ function createSetlist() {
     setlistStore.activeSetlistId = setlist.id;
     newSetlistName.value = "";
     showCreateForm.value = false;
+}
+
+function deleteActiveSetlist() {
+    const setlist = setlistStore.activeSetlist;
+    if (!setlist) return;
+    if (!confirm(`Delete the setlist "${setlist.name}"? It will be removed for the whole band.`)) return;
+    setlistStore.deleteSetlist(setlist.id);
 }
 
 function addCurrentTab() {
@@ -44,31 +53,81 @@ function navigateToSong(index: number) {
     }
 }
 
+function move(index: number, direction: number) {
+    if (!setlistStore.activeSetlistId) return;
+    setlistStore.reorderSetlist(setlistStore.activeSetlistId, index, index + direction);
+    syncCurrentIndex();
+}
+
+// Highlight the song that is on screen, however we got to it
+function syncCurrentIndex() {
+    const index = setlistStore.activeSetlist?.items.findIndex((item) => item.tabId === props.currentTabId) ?? -1;
+    if (index >= 0) {
+        setlistStore.currentItemIndex = index;
+    }
+}
+
 const setlistOptions = computed(() => setlistStore.setlists);
+
+const activeTabIds = computed(() => setlistStore.activeSetlist?.items.map((item) => item.tabId) ?? []);
+
+const offlineSummary = computed(() => {
+    const setlist = setlistStore.activeSetlist;
+    if (!setlist || setlist.items.length === 0) return "";
+    if (offline.downloadingId.value === setlist.id) {
+        return `Downloading ${offline.progress.value.done} of ${offline.progress.value.total}...`;
+    }
+    return `${offline.offlineCount(setlist)} of ${setlist.items.length} songs on this device`;
+});
+
+watch(activeTabIds, (ids) => {
+    offline.refresh(ids);
+}, { immediate: true });
+
+watch(() => [props.currentTabId, setlistStore.activeSetlistId, setlistStore.ready], syncCurrentIndex);
+
+onMounted(syncCurrentIndex);
 </script>
 
 <template>
     <div class="setlist-sidebar">
         <div class="sidebar-header">
             <h3>Setlists</h3>
-            <button class="close-btn" @click='emit("close")'>×</button>
+            <button class="close-btn" aria-label="Close setlists" @click='emit("close")'>×</button>
         </div>
 
         <!-- Setlist selector -->
         <div class="setlist-selector">
-            <select v-model="setlistStore.activeSetlistId" class="setlist-select">
+            <select v-model="setlistStore.activeSetlistId" class="setlist-select" aria-label="Setlist">
                 <option :value="null">Select a setlist...</option>
                 <option v-for="s in setlistOptions" :key="s.id" :value="s.id">
                     {{ s.name }} ({{ s.items.length }})
                 </option>
             </select>
-            <button class="add-btn" @click="showCreateForm = !showCreateForm">+</button>
+            <button class="add-btn" aria-label="New setlist" @click="showCreateForm = !showCreateForm">+</button>
         </div>
 
         <!-- Create form -->
         <div v-if="showCreateForm" class="create-form">
             <input v-model="newSetlistName" placeholder="Setlist name..." @keyup.enter="createSetlist" />
             <button @click="createSetlist">Create</button>
+        </div>
+
+        <!-- Offline status -->
+        <div v-if="setlistStore.activeSetlist && setlistStore.activeSetlist.items.length > 0" class="offline-bar">
+            <div class="offline-summary" :class="{ complete: offline.isSetlistOffline(setlistStore.activeSetlist) }">
+                {{ offlineSummary }}
+            </div>
+            <button
+                class="offline-btn"
+                :disabled="offline.downloadingId.value !== null"
+                @click="offline.download(setlistStore.activeSetlist)"
+            >
+                {{ offline.isSetlistOffline(setlistStore.activeSetlist) ? "Refresh offline copy" : "Make available offline" }}
+            </button>
+            <div v-if="offline.failedTitles.value.length > 0" class="offline-failed">
+                Could not download: {{ offline.failedTitles.value.join(", ") }}
+            </div>
         </div>
 
         <!-- Active setlist songs -->
@@ -83,13 +142,33 @@ const setlistOptions = computed(() => setlistStore.setlists);
                 <span class="song-number">{{ index + 1 }}</span>
                 <div class="song-info">
                     <div class="song-title">{{ item.title }}</div>
-                    <div class="song-artist">{{ item.artist }}</div>
+                    <div class="song-artist">
+                        <span
+                            class="offline-dot"
+                            :class="{ on: offline.offlineTabIds.value.has(item.tabId) }"
+                            :title='offline.offlineTabIds.value.has(item.tabId) ? "On this device" : "Needs a connection"'
+                        ></span>
+                        {{ item.artist }}
+                    </div>
                 </div>
-                <button class="remove-btn" @click.stop="setlistStore.removeFromSetlist(setlistStore.activeSetlistId!, item.id)">×</button>
+                <button class="icon-btn" aria-label="Move up" :disabled="index === 0" @click.stop="move(index, -1)">▲</button>
+                <button
+                    class="icon-btn"
+                    aria-label="Move down"
+                    :disabled="index === setlistStore.activeSetlist.items.length - 1"
+                    @click.stop="move(index, 1)"
+                >
+                    ▼
+                </button>
+                <button class="remove-btn" aria-label="Remove from setlist" @click.stop="setlistStore.removeFromSetlist(setlistStore.activeSetlistId!, item.id)">×</button>
             </div>
 
             <button class="add-current-btn" @click="addCurrentTab">
                 + Add current tab
+            </button>
+
+            <button class="delete-setlist-btn" @click="deleteActiveSetlist">
+                Delete this setlist
             </button>
         </div>
 
@@ -307,5 +386,96 @@ const setlistOptions = computed(() => setlistStore.setlists);
 
 .nav-buttons button:not(:disabled):hover {
     background: #1e2d4a;
+}
+
+.setlist-sidebar {
+    max-width: 100vw;
+    height: 100dvh;
+}
+
+.offline-bar {
+    padding: 10px 16px;
+    border-bottom: 1px solid #2a2a4a;
+}
+
+.offline-summary {
+    font-size: 13px;
+    color: #9aa0b4;
+    margin-bottom: 8px;
+}
+
+.offline-summary.complete {
+    color: #5fd38a;
+}
+
+.offline-btn {
+    width: 100%;
+    min-height: 44px;
+    background: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #4a90d9;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.offline-btn:disabled {
+    opacity: 0.5;
+    cursor: progress;
+}
+
+.offline-failed {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #f0a35e;
+}
+
+.offline-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 4px;
+    border-radius: 50%;
+    border: 1px solid #777;
+    background: transparent;
+}
+
+.offline-dot.on {
+    background: #5fd38a;
+    border-color: #5fd38a;
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    color: #777;
+    font-size: 12px;
+    cursor: pointer;
+    min-width: 32px;
+    min-height: 44px;
+    flex-shrink: 0;
+}
+
+.icon-btn:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+.remove-btn {
+    min-width: 32px;
+    min-height: 44px;
+}
+
+.delete-setlist-btn {
+    display: block;
+    width: calc(100% - 32px);
+    margin: 16px 16px 8px;
+    padding: 10px;
+    background: transparent;
+    color: #c66;
+    border: 1px solid #533;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
 }
 </style>

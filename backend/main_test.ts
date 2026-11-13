@@ -260,6 +260,79 @@ Deno.test({
 });
 
 Deno.test({
+    name: "setlist sync endpoints (HTTP)",
+    sanitizeResources: false,
+    sanitizeOps: false,
+    fn: async () => {
+        // Requires login
+        const anon = await fetch(`${baseURL}/api/setlists`);
+        assertEquals(anon.status, 400);
+        await anon.body?.cancel();
+
+        const signInRes = await fetch(`${baseURL}/api/auth/sign-in/email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: "test+ci@example.com", password: "password123" }),
+        });
+        await signInRes.body?.cancel();
+        const cookiePair = signInRes.headers.get("set-cookie")!.split(";", 1)[0];
+        const headers = { "Content-Type": "application/json", Cookie: cookiePair };
+
+        const put = async (setlist: Record<string, unknown>, urlId = setlist.id) => {
+            const res = await fetch(`${baseURL}/api/setlists/${urlId}`, {
+                method: "PUT",
+                headers,
+                body: JSON.stringify(setlist),
+            });
+            return { status: res.status, json: await res.json() };
+        };
+
+        const base = {
+            id: "setlist-test-1",
+            name: "Friday Gig",
+            items: [{ id: "i1", tabId: "1", title: "Song A", artist: "Band", order: 0 }],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+        };
+
+        // Create
+        const created = await put(base);
+        assertEquals(created.status, 200, JSON.stringify(created.json));
+        assertEquals(created.json.applied, true);
+
+        // Newer edit wins
+        const newer = await put({ ...base, name: "Friday Gig v2", updatedAt: "2026-01-02T00:00:00.000Z" });
+        assertEquals(newer.json.applied, true);
+
+        // Stale edit from a device that was offline is rejected, and the server copy is returned
+        const stale = await put({ ...base, name: "Stale", updatedAt: "2026-01-01T12:00:00.000Z" });
+        assertEquals(stale.status, 200);
+        assertEquals(stale.json.applied, false);
+        assertEquals(stale.json.setlist.name, "Friday Gig v2");
+
+        // Id in the body must match the URL
+        const mismatch = await put(base, "another-id");
+        assertEquals(mismatch.status, 400);
+
+        // Invalid body is rejected
+        const invalid = await put({ id: "setlist-test-2", name: "" });
+        assertEquals(invalid.status, 400);
+
+        // Deleting leaves a tombstone in the list
+        const deleted = await put({ ...base, items: [], deleted: true, updatedAt: "2026-01-03T00:00:00.000Z" });
+        assertEquals(deleted.json.applied, true);
+
+        const listRes = await fetch(`${baseURL}/api/setlists`, { headers });
+        const list = await listRes.json();
+        assertEquals(list.ok, true);
+        const found = list.setlists.find((s: { id: string }) => s.id === "setlist-test-1");
+        assertExists(found);
+        assertEquals(found.deleted, true);
+        assertEquals(found.name, "Friday Gig");
+    },
+});
+
+Deno.test({
     name: "suggest-youtube API endpoint (HTTP)",
     sanitizeResources: false,
     sanitizeOps: false,

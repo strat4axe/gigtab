@@ -39,11 +39,31 @@ export interface CachedProfile {
     cachedAt: string;
 }
 
+// Setlist stored in IndexedDB. Mirrors the server shape plus local sync state.
+export interface CachedSetlistItem {
+    id: string;
+    tabId: string;
+    title: string;
+    artist: string;
+    order: number;
+}
+
+export interface CachedSetlist {
+    id: string;
+    name: string;
+    items: CachedSetlistItem[];
+    createdAt: string; // ISO timestamp
+    updatedAt: string; // ISO timestamp, used for last-write-wins sync
+    deleted?: boolean; // tombstone, kept so the deletion can be synced
+    pendingSync?: boolean; // changed on this device and not yet pushed to the server
+}
+
 export class GigTabDatabase extends Dexie {
     tabs!: Table<CachedTab, string>;
     files!: Table<CachedFile, string>;
     audio!: Table<CachedAudio, number>;
     profile!: Table<CachedProfile, string>;
+    setlists!: Table<CachedSetlist, string>;
 
     constructor() {
         super("GigTabDatabase");
@@ -52,6 +72,9 @@ export class GigTabDatabase extends Dexie {
             files: "tabId",
             audio: "++id, tabId, filename, [tabId+filename]",
             profile: "userId, email",
+        });
+        this.version(2).stores({
+            setlists: "id, updatedAt",
         });
     }
 }

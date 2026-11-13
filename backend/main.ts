@@ -2,7 +2,8 @@ import { serve, ServerType } from "@hono/node-server";
 import { Context, Hono } from "@hono/hono";
 import * as fs from "@std/fs";
 import { auth, checkLogin, disableSignUp, enableSignUp, getAdminSession, getCurrentSession, isAdmin, isFinishSetup, isLoggedIn } from "./auth.ts";
-import { AppleMusicAddDataSchema, InviteSignUpSchema, SyncRequestSchema, TabInfo, UpdateTabFavSchema, UpdateTabInfoSchema, YoutubeAddDataSchema } from "./zod.ts";
+import { AppleMusicAddDataSchema, InviteSignUpSchema, SetlistSchema, SyncRequestSchema, TabInfo, UpdateTabFavSchema, UpdateTabInfoSchema, YoutubeAddDataSchema } from "./zod.ts";
+import { getAllSetlists, putSetlist } from "./setlist.ts";
 import { db, getAllUsers, getFirstUserId, hasUser, isInitDB, kv, migrate } from "./db.ts";
 import { createInvite, deleteInvite, getValidInvite, initInviteTable, listInvites, markInviteUsed } from "./invite.ts";
 import { cors } from "@hono/hono/cors";
@@ -813,6 +814,38 @@ export async function main() {
             const body = await c.req.json();
             await kv.set(["user_setting", session.user.id], body);
             return c.json({ ok: true });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Setlists (band-wide). Includes tombstones so deletions reach every device.
+    app.get("/api/setlists", async (c) => {
+        try {
+            await getCurrentSession(c);
+            return c.json({
+                ok: true,
+                setlists: await getAllSetlists(),
+            });
+        } catch (e) {
+            return generalError(c, e);
+        }
+    });
+
+    // Create, update or delete (deleted: true) a setlist. Last write wins on updatedAt.
+    app.put("/api/setlists/:id", async (c) => {
+        try {
+            await getCurrentSession(c);
+            const body = SetlistSchema.parse(await c.req.json());
+            if (body.id !== c.req.param("id")) {
+                throw new Error("Setlist id does not match the URL");
+            }
+            const result = await putSetlist(body);
+            return c.json({
+                ok: true,
+                applied: result.applied,
+                setlist: result.setlist,
+            });
         } catch (e) {
             return generalError(c, e);
         }

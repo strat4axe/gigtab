@@ -4,10 +4,17 @@ import { notify } from "@kyvg/vue3-notification";
 import { baseURL, getSetting } from "../app.js";
 import { isLoggedIn } from "../auth-client.js";
 import TabItem from "../components/TabItem.vue";
+import SetlistPanel from "../components/SetlistPanel.vue";
+import { useSetlistStore } from "../stores/setlistStore";
 
 export default defineComponent({
     components: {
         TabItem,
+        SetlistPanel,
+    },
+
+    setup() {
+        return { setlistStore: useSetlistStore() };
     },
 
     data() {
@@ -54,6 +61,14 @@ export default defineComponent({
     },
 
     computed: {
+        activeSetlistName() {
+            return this.setlistStore.activeSetlist?.name || "";
+        },
+
+        activeSetlistTabIds() {
+            return new Set((this.setlistStore.activeSetlist?.items || []).map((item) => item.tabId));
+        },
+
         filteredTabList() {
             if (!this.searchQuery.trim()) return this.tabList;
 
@@ -115,6 +130,12 @@ export default defineComponent({
             return this.me.isAdmin || !tab.ownerId || tab.ownerId === this.me.id;
         },
 
+        addToSetlist(tab) {
+            const setlist = this.setlistStore.activeSetlist;
+            if (!setlist) return;
+            this.setlistStore.addToSetlist(setlist.id, tab.id, tab.title, tab.artist);
+        },
+
         handleFavToggled() {
             // Force re-render by creating a new array reference
             this.tabList = [...this.tabList];
@@ -162,10 +183,15 @@ export default defineComponent({
                 :show-artist="true"
                 :owner-name="ownerName(tab)"
                 :can-edit="canEdit(tab)"
+                :setlist-name="activeSetlistName"
+                :in-setlist="activeSetlistTabIds.has(tab.id)"
                 @delete="deleteTab"
                 @favToggled="handleFavToggled"
+                @addToSetlist="addToSetlist"
             />
         </div>
+
+        <SetlistPanel v-if="ready" class="mt-4" />
 
         <div class="search-section mb-3 mt-4 pe-3 ps-3" v-if="ready">
             <div class="input-group">
@@ -212,8 +238,11 @@ export default defineComponent({
                     :show-artist="false"
                     :owner-name="ownerName(tab)"
                     :can-edit="canEdit(tab)"
+                    :setlist-name="activeSetlistName"
+                    :in-setlist="activeSetlistTabIds.has(tab.id)"
                     @delete="deleteTab"
                     @favToggled="handleFavToggled"
+                    @addToSetlist="addToSetlist"
                 />
             </div>
         </template>
@@ -226,8 +255,11 @@ export default defineComponent({
                 :show-artist="true"
                 :owner-name="ownerName(tab)"
                 :can-edit="canEdit(tab)"
+                :setlist-name="activeSetlistName"
+                :in-setlist="activeSetlistTabIds.has(tab.id)"
                 @delete="deleteTab"
                 @favToggled="handleFavToggled"
+                @addToSetlist="addToSetlist"
             />
         </template>
 

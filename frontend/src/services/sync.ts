@@ -1,6 +1,7 @@
 import { db } from "./storage.ts";
 import { baseURL } from "../app.ts";
 import { checkServerReachable } from "./fetch-interceptor.ts";
+import { remapSetlistTabId, syncSetlists } from "./setlist-sync.ts";
 
 let isSyncing = false;
 
@@ -108,6 +109,8 @@ export async function runSync(): Promise<void> {
                                     fileBlob: audio.fileBlob,
                                 });
                             }
+                            // Setlists that reference the temporary id must follow the tab
+                            await remapSetlistTabId(tab.id, newServerId);
                             console.info(`Local tab ${tab.id} uploaded and synced as server ID ${newServerId}`);
                         }
                     } else {
@@ -181,6 +184,9 @@ export async function runSync(): Promise<void> {
                 }
             }
         }
+
+        // --- 4. SETLISTS ---
+        await syncSetlists();
 
         console.info("Synchronization complete.");
     } catch (e) {

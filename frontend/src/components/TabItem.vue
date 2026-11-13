@@ -22,9 +22,19 @@ export default defineComponent({
             type: Boolean,
             default: true,
         },
+        // Name of the setlist that "+ Setlist" adds to ("" = hide the button)
+        setlistName: {
+            type: String,
+            default: "",
+        },
+        // Already in that setlist
+        inSetlist: {
+            type: Boolean,
+            default: false,
+        },
     },
 
-    emits: ["delete", "favToggled"],
+    emits: ["delete", "favToggled", "addToSetlist"],
 
     methods: {
         handleEdit() {
@@ -87,6 +97,16 @@ export default defineComponent({
             </div>
             <div class="artist" v-if="showArtist">{{ tab.artist }}</div>
         </router-link>
+
+        <button
+            class="btn btn-outline-secondary me-2"
+            v-if="setlistName"
+            :disabled="inSetlist"
+            :title="`Add to ${setlistName}`"
+            @click='$emit("addToSetlist", tab)'
+        >
+            {{ inSetlist ? "In setlist" : "+ Setlist" }}
+        </button>
 
         <button class="btn btn-secondary me-2" @click="handleEdit" v-if="canEdit">
             Edit

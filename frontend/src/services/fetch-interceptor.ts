@@ -37,6 +37,54 @@ export async function checkServerReachable(): Promise<boolean> {
 // Periodic background reachability checks
 setInterval(checkServerReachable, 15000);
 
+// One in-flight asset download per tab, so the background cache and an explicit
+// "make available offline" request share the same work instead of downloading twice.
+const assetDownloads = new Map<string, Promise<void>>();
+
+/**
+ * Download a tab's file and audio files into IndexedDB.
+ * Rejects if anything could not be stored, so callers can report it.
+ */
+export function cacheTabAssets(tabId: string, filename: string, audioList: { filename: string }[]): Promise<void> {
+    const inFlight = assetDownloads.get(tabId);
+    if (inFlight) {
+        return inFlight;
+    }
+
+    const work = (async () => {
+        const fileRes = await originalFetch((baseURL || "") + `/api/tab/${tabId}/file`, { credentials: "include" });
+        if (!fileRes.ok) {
+            throw new Error(`Tab file request failed (${fileRes.status})`);
+        }
+        await db.files.put({
+            tabId,
+            fileBlob: await fileRes.blob(),
+            extension: filename.split(".").pop()?.toLowerCase() || "gp",
+        });
+
+        for (const audio of audioList) {
+            const cached = await db.audio.where({ tabId, filename: audio.filename }).first();
+            if (cached) {
+                continue;
+            }
+            const audioRes = await originalFetch((baseURL || "") + `/api/tab/${tabId}/audio/${encodeURIComponent(audio.filename)}`, { credentials: "include" });
+            if (!audioRes.ok) {
+                throw new Error(`Audio request failed for ${audio.filename} (${audioRes.status})`);
+            }
+            await db.audio.put({
+                tabId,
+                filename: audio.filename,
+                fileBlob: await audioRes.blob(),
+            });
+        }
+    })().finally(() => {
+        assetDownloads.delete(tabId);
+    });
+
+    assetDownloads.set(tabId, work);
+    return work;
+}
+
 export function initFetchInterceptor() {
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const urlStr = typeof input === "string" ? input : (input instanceof URL ? input.href : input.url);
@@ -100,41 +148,8 @@ export function initFetchInterceptor() {
                                 pendingSync: false,
                             });
 
-                            // Background cache the tab file itself
-                            const fileURL = (baseURL || "") + `/api/tab/${tab.id}/file`;
-                            originalFetch(fileURL).then(async (fileRes) => {
-                                if (fileRes.ok) {
-                                    const blob = await fileRes.blob();
-                                    const ext = tab.filename.split(".").pop()?.toLowerCase() || "gp";
-                                    await db.files.put({
-                                        tabId: tab.id,
-                                        fileBlob: blob,
-                                        extension: ext,
-                                    });
-                                }
-                            }).catch((err) => console.warn(`Background cache file for tab ${tab.id} failed:`, err));
-
-                            // Background cache any associated audio files
-                            const audioList = data.audioList || [];
-                            for (const audio of audioList) {
-                                const audioFilename = audio.filename;
-                                const audioURL = (baseURL || "") + `/api/tab/${tab.id}/audio/${encodeURIComponent(audioFilename)}`;
-
-                                // Check if we already have it cached locally
-                                const cachedAudio = await db.audio.where({ tabId: tab.id, filename: audioFilename }).first();
-                                if (!cachedAudio) {
-                                    originalFetch(audioURL).then(async (audioRes) => {
-                                        if (audioRes.ok) {
-                                            const blob = await audioRes.blob();
-                                            await db.audio.put({
-                                                tabId: tab.id,
-                                                filename: audioFilename,
-                                                fileBlob: blob,
-                                            });
-                                        }
-                                    }).catch((err) => console.warn(`Background cache audio ${audioFilename} failed:`, err));
-                                }
-                            }
+                            // Background cache the tab file and any audio files
+                            cacheTabAssets(tab.id, tab.filename, data.audioList || []).catch((err) => console.warn(`Background cache for tab ${tab.id} failed:`, err));
                         }
                     } catch (e) {
                         console.warn("Auto-caching single tab failed:", e);
