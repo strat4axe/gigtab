@@ -232,6 +232,7 @@ const {
     setAudioPlayerRef,
     getPlaybackTimeAndDuration,
     getCurrentSyncOffsetMs,
+    mediaError,
     seekTo,
     seekByProgress,
 } = audioSync;
@@ -577,6 +578,18 @@ watch(playing, (newVal) => {
             stopLinearScroll();
             stopMediaScroll();
         }
+    }
+});
+
+// The music source reported an error: stop waiting for it and scroll on the saved duration
+watch(mediaError, (error) => {
+    if (!error) {
+        return;
+    }
+    mediaFailed.value = true;
+    if (playing.value && isTextFile(tab.value.filename)) {
+        stopMediaScroll();
+        startLinearScroll();
     }
 });
 
@@ -1117,8 +1130,15 @@ onBeforeUnmount(() => {
 
             <!-- USE v-show, because youtube player is not vue  -->
             <div v-show='currentAudio.startsWith("youtube-") || currentAudio.startsWith("audio-") || currentAudio.startsWith("applemusic-")' class="player-container">
+                <!-- Music source problem -->
+                <div class="media-error ps-3 pe-3 p-2" v-if="mediaError" role="alert">
+                    <div>{{ mediaError.message }}</div>
+                    <div class="small">Scrolling on the saved song duration instead. (YouTube error {{ mediaError.code }})</div>
+                    <router-link v-if="canEdit" :to="`/tab/${tab.id}/edit/audio`">Choose another video</router-link>
+                </div>
+
                 <!-- Simple sync edit -->
-                <div class="sync-offset ps-3 pe-3 p-2" v-if='syncMethod === "simple" && canEdit'>
+                <div class="sync-offset ps-3 pe-3 p-2" v-if='syncMethod === "simple" && canEdit && !mediaError'>
                     Sync Offset: <input type="number" class="form-control" min="-100000" max="100000" step="0.1" v-model="simpleSyncSecond" /> s
                 </div>
 
@@ -1254,6 +1274,19 @@ $youtube-height: 200px;
             &:hover {
                 color: white;
             }
+        }
+    }
+
+    .media-error {
+        max-width: 320px;
+        white-space: normal;
+        color: #fff;
+        background-color: #7a3b12;
+        font-size: 14px;
+
+        a {
+            color: #ffd9a8;
+            text-decoration: underline;
         }
     }
 

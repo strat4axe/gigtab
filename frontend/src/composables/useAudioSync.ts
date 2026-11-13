@@ -26,6 +26,8 @@ export function useAudioSync(
     setConfig: (key: string, value: any) => void,
 ) {
     const currentAudio = ref("synth");
+    // Set when the selected music source reports that it cannot play (null = no problem)
+    const mediaError = ref<{ code: number | string; message: string } | null>(null);
     const youtube = ref<Record<string, any>>({});
     const audio = ref<Record<string, any>>({});
     const appleMusic = ref<Record<string, any>>({});
@@ -139,6 +141,7 @@ export function useAudioSync(
     // Switch Audio Source
     watch(currentAudio, async () => {
         console.log("Switching audio to:", currentAudio.value);
+        mediaError.value = null;
 
         if (!api.value) {
             return;
@@ -383,6 +386,25 @@ export function useAudioSync(
         _audioPlayerRef = el;
     }
 
+    // https://developers.google.com/youtube/iframe_api_reference#onError
+    function describeYoutubeError(code: unknown): string {
+        switch (code) {
+            case 2:
+                return "The YouTube link for this song is not valid.";
+            case 5:
+                return "YouTube could not play this video in the embedded player.";
+            case 100:
+                return "This YouTube video was removed or is private.";
+            case 101:
+            case 150:
+                return "YouTube does not allow this video to play inside other sites. Choose a different video for this song.";
+            case 153:
+                return "YouTube rejected the embedded player on this address. Open GigTab at http://localhost instead of an IP address.";
+            default:
+                return "YouTube could not play this video.";
+        }
+    }
+
     async function initYoutubePlayer() {
         const ytWarning = setTimeout(() => {
             notify({
@@ -471,6 +493,12 @@ export function useAudioSync(
                     api.value.playbackSpeed = e.data;
                 },
                 "onError": (e: any) => {
+                    console.warn("YouTube player error:", e?.data);
+                    mediaError.value = {
+                        code: e?.data ?? "unknown",
+                        message: describeYoutubeError(e?.data),
+                    };
+                    window.clearInterval(currentTimeInterval);
                     youtubePlayerReady.reject(e);
                 },
             },
@@ -883,6 +911,7 @@ export function useAudioSync(
         initSynth,
         getPlaybackTimeAndDuration,
         getCurrentSyncOffsetMs,
+        mediaError,
         seekTo,
         seekByProgress,
     };
